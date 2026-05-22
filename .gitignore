@@ -56,3 +56,7 @@ GEMINI.md
 plan.md
 obsidian_vault/
 Aun_Vault/
+
+# Test files
+src/test/
+test_*.pl
