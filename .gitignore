@@ -49,3 +49,10 @@ tables/**/npcs.txt
 tables/**/monsters.txt
 *.xpm
 *.weight
+
+# Personal and tracking files
+TODO*.md
+GEMINI.md
+plan.md
+obsidian_vault/
+Aun_Vault/
