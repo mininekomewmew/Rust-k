@@ -1,0 +1,416 @@
+{
+  "nodes": [
+    {
+      "id": "xstools_root",
+      "label": "XSTools",
+      "file_type": "document",
+      "source_file": "src/auto/XSTools/FileList.txt",
+      "source_location": null
+    },
+    {
+      "id": "osl_library",
+      "label": "OpenKore Standard Library (OSL)",
+      "file_type": "document",
+      "source_file": "src/auto/XSTools/OSL/README.TXT",
+      "source_location": null,
+      "rationale": "C++ library containing common portability and utility features to abstract OS-specific differences."
+    },
+    {
+      "id": "padded_packets_emulator",
+      "label": "Padded Packets Emulator",
+      "file_type": "document",
+      "source_file": "src/auto/XSTools/PaddedPackets/README.TXT",
+      "source_location": null,
+      "rationale": "Subsystem designed to handle complex hashing algorithms used by specific RO servers (euRO, iRO, rRO) for client-to-server packets like sit, stand, and attack."
+    },
+    {
+      "id": "ai_subsystem",
+      "label": "AI Subsystem",
+      "file_type": "document",
+      "source_file": "src/doc/srcdoc/artificial-intelligence.html",
+      "source_location": null,
+      "rationale": "Designed as a non-blocking system using a command queue (@ai_seq) and argument array (@ai_seq_args) to manage asynchronous tasks without blocking the main loop."
+    },
+    {
+      "id": "ai_seq_array",
+      "label": "@ai_seq",
+      "file_type": "code",
+      "source_file": "src/doc/srcdoc/artificial-intelligence.html",
+      "source_location": null
+    },
+    {
+      "id": "ai_seq_args_array",
+      "label": "@ai_seq_args",
+      "file_type": "code",
+      "source_file": "src/doc/srcdoc/artificial-intelligence.html",
+      "source_location": null
+    },
+    {
+      "id": "init_main_loop",
+      "label": "Initialization & Main Loop",
+      "file_type": "document",
+      "source_file": "src/doc/srcdoc/init.html",
+      "source_location": null,
+      "rationale": "The core operational cycle of OpenKore, involving configuration loading, server connection, and a non-blocking loop processing interface, network data, and AI."
+    },
+    {
+      "id": "poseidon_system",
+      "label": "Poseidon",
+      "file_type": "document",
+      "source_file": "src/Poseidon/TECHNICAL.TXT",
+      "source_location": null,
+      "rationale": "A solution for bypassing GameGuard by proxying queries between OpenKore and a real RO client via a fake server (PoseidonRO)."
+    },
+    {
+      "id": "poseidon_client",
+      "label": "Poseidon::Client",
+      "file_type": "code",
+      "source_file": "src/Poseidon/TECHNICAL.TXT",
+      "source_location": null
+    },
+    {
+      "id": "bus_messages",
+      "label": "Bus::Messages",
+      "file_type": "code",
+      "source_file": "src/Poseidon/TECHNICAL.TXT",
+      "source_location": null
+    },
+    {
+      "id": "translation_system",
+      "label": "Translation System",
+      "file_type": "document",
+      "source_file": "src/po/readme.txt",
+      "source_location": null,
+      "rationale": "I18n and l10n framework utilizing GNU gettext tools (xgettext, msgmerge, msgfmt) to scan Perl source for translatable strings."
+    },
+    {
+      "id": "cpan_dependencies",
+      "label": "CPAN Dependencies",
+      "file_type": "document",
+      "source_file": "src/deps/README.TXT",
+      "source_location": null,
+      "rationale": "Inclusion of third-party Perl modules from CPAN to provide a standalone installation environment without requiring users to manually install dependencies."
+    },
+    {
+      "id": "openkore_branches",
+      "label": "SVN Branches",
+      "file_type": "document",
+      "source_file": "src/Branches.txt",
+      "source_location": null
+    },
+    {
+      "id": "test_pickupitems",
+      "label": "Item Pickup Test Data",
+      "file_type": "code",
+      "source_file": "src/test/pickupitems.txt"
+    },
+    {
+      "id": "test_portals",
+      "label": "Portal Connection Test Data",
+      "file_type": "code",
+      "source_file": "src/test/portals.txt"
+    },
+    {
+      "id": "test_resnametable",
+      "label": "Resource Name Table Test Data",
+      "file_type": "code",
+      "source_file": "src/test/resnametable.txt"
+    },
+    {
+      "id": "test_skillnametable",
+      "label": "Skill Name Table Test Data",
+      "file_type": "code",
+      "source_file": "src/test/skillnametable.txt"
+    },
+    {
+      "id": "test_skillssp",
+      "label": "Skill SP Cost Test Data",
+      "file_type": "code",
+      "source_file": "src/test/skillssp.txt"
+    },
+    {
+      "id": "test_skill_id_handle",
+      "label": "Skill ID Handle Test Data",
+      "file_type": "code",
+      "source_file": "src/test/SKILL_id_handle.txt"
+    },
+    {
+      "id": "test_config_child",
+      "label": "Config Child Test File",
+      "file_type": "code",
+      "source_file": "src/test/data/child.txt"
+    },
+    {
+      "id": "test_config_create_if_missing",
+      "label": "Config Create-If-Missing Test File",
+      "file_type": "code",
+      "source_file": "src/test/data/create_if_missing.txt"
+    },
+    {
+      "id": "test_config_parent",
+      "label": "Config Parent Test File",
+      "file_type": "code",
+      "source_file": "src/test/data/parent.txt"
+    },
+    {
+      "id": "test_config_write_config",
+      "label": "Config Write Test File",
+      "file_type": "code",
+      "source_file": "src/test/data/write_config.txt"
+    },
+    {
+      "id": "test_config_write_config_a",
+      "label": "Config Write A Test File",
+      "file_type": "code",
+      "source_file": "src/test/data/write_config_a.txt"
+    },
+    {
+      "id": "test_config_child_a",
+      "label": "Config Child A Test File",
+      "file_type": "code",
+      "source_file": "src/test/data/child/a.txt"
+    },
+    {
+      "id": "doc_development_img",
+      "label": "Development Process Diagram",
+      "file_type": "image",
+      "source_file": "src/doc/srcdoc/development.png"
+    },
+    {
+      "id": "doc_ipc_network_img",
+      "label": "IPC and Network Architecture Diagram",
+      "file_type": "image",
+      "source_file": "src/doc/srcdoc/ipc-network.png"
+    },
+    {
+      "id": "doc_overview_img",
+      "label": "System Overview Diagram",
+      "file_type": "image",
+      "source_file": "src/doc/srcdoc/overview.png"
+    },
+    {
+      "id": "interface_wx_close_img",
+      "label": "Wx Close Icon",
+      "file_type": "image",
+      "source_file": "src/Interface/Wx/close.png"
+    },
+    {
+      "id": "interface_wx_window_img",
+      "label": "Wx Window Icon",
+      "file_type": "image",
+      "source_file": "src/Interface/Wx/window.png"
+    },
+    {
+      "id": "task_useskill_img",
+      "label": "UseSkill Task State Machine Diagram",
+      "file_type": "image",
+      "source_file": "src/Task/UseSkill.png"
+    }
+  ],
+  "edges": [
+    {
+      "source": "xstools_root",
+      "target": "osl_library",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/auto/XSTools/FileList.txt"
+    },
+    {
+      "source": "xstools_root",
+      "target": "padded_packets_emulator",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/auto/XSTools/FileList.txt"
+    },
+    {
+      "source": "ai_subsystem",
+      "target": "ai_seq_array",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/doc/srcdoc/artificial-intelligence.html"
+    },
+    {
+      "source": "ai_subsystem",
+      "target": "ai_seq_args_array",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/doc/srcdoc/artificial-intelligence.html"
+    },
+    {
+      "source": "init_main_loop",
+      "target": "ai_subsystem",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/doc/srcdoc/init.html"
+    },
+    {
+      "source": "poseidon_system",
+      "target": "bus_messages",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Poseidon/TECHNICAL.TXT"
+    },
+    {
+      "source": "poseidon_system",
+      "target": "poseidon_client",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Poseidon/TECHNICAL.TXT"
+    },
+    {
+      "source": "padded_packets_emulator",
+      "target": "ai_subsystem",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.75,
+      "source_file": "src/auto/XSTools/PaddedPackets/README.TXT"
+    },
+    {
+      "source": "osl_library",
+      "target": "xstools_root",
+      "relation": "rationale_for",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "src/auto/XSTools/OSL/README.TXT"
+    },
+    {
+      "source": "test_config_parent",
+      "target": "test_config_child",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/test/data/parent.txt"
+    },
+    {
+      "source": "test_config_parent",
+      "target": "test_config_child_a",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/test/data/parent.txt"
+    },
+    {
+      "source": "test_config_write_config",
+      "target": "test_config_write_config_a",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/test/data/write_config.txt"
+    },
+    {
+      "source": "test_portals",
+      "target": "test_resnametable",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "src/test/portals.txt"
+    },
+    {
+      "source": "test_skillnametable",
+      "target": "test_skillssp",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "src/test/skillnametable.txt"
+    },
+    {
+      "source": "test_skillnametable",
+      "target": "test_skill_id_handle",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "src/test/skillnametable.txt"
+    },
+    {
+      "source": "doc_overview_img",
+      "target": "doc_ipc_network_img",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "src/doc/srcdoc/overview.png"
+    },
+    {
+      "source": "interface_wx_close_img",
+      "target": "interface_wx_window_img",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "src/Interface/Wx/close.png"
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "ai_core_logic",
+      "label": "AI Core Logic Components",
+      "nodes": [
+        "ai_subsystem",
+        "ai_seq_array",
+        "ai_seq_args_array"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/doc/srcdoc/artificial-intelligence.html"
+    },
+    {
+      "id": "poseidon_architecture",
+      "label": "Poseidon System Architecture",
+      "nodes": [
+        "poseidon_system",
+        "poseidon_client",
+        "bus_messages"
+      ],
+      "relation": "implement",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Poseidon/TECHNICAL.TXT"
+    },
+    {
+      "id": "skill_system_test_suite",
+      "label": "Skill System Test Data Suite",
+      "nodes": [
+        "test_skillnametable",
+        "test_skillssp",
+        "test_skill_id_handle"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "src/test/skillnametable.txt"
+    },
+    {
+      "id": "config_inclusion_tests",
+      "label": "Configuration Inclusion Test Suite",
+      "nodes": [
+        "test_config_parent",
+        "test_config_child",
+        "test_config_child_a",
+        "test_config_write_config"
+      ],
+      "relation": "implement",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/test/data/parent.txt"
+    },
+    {
+      "id": "system_architecture_docs",
+      "label": "Core System Documentation",
+      "nodes": [
+        "doc_overview_img",
+        "doc_ipc_network_img",
+        "doc_development_img"
+      ],
+      "relation": "participate_in",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "src/doc/srcdoc/overview.png"
+    }
+  ]
+}

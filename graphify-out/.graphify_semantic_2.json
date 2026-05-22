@@ -1,0 +1,192 @@
+{
+  "nodes": [
+    {
+      "id": "settings_settings",
+      "label": "Settings Module",
+      "file_type": "code",
+      "source_file": "src/Settings.pm"
+    },
+    {
+      "id": "log_log",
+      "label": "Log Module",
+      "file_type": "code",
+      "source_file": "src/Log.pm"
+    },
+    {
+      "id": "utils_utils",
+      "label": "Utils Module",
+      "file_type": "code",
+      "source_file": "src/Utils.pm"
+    },
+    {
+      "id": "network_receive_network_receive",
+      "label": "Network::Receive Module",
+      "file_type": "code",
+      "source_file": "src/Network/Receive.pm"
+    },
+    {
+      "id": "network_send_network_send",
+      "label": "Network::Send Module",
+      "file_type": "code",
+      "source_file": "src/Network/Send.pm"
+    },
+    {
+      "id": "settings_control_files",
+      "label": "Control Files",
+      "file_type": "document",
+      "source_file": "src/Settings.pm",
+      "rationale": "Configuration files that define character-specific behavior and can be changed at any time."
+    },
+    {
+      "id": "settings_table_files",
+      "label": "Table Files",
+      "file_type": "document",
+      "source_file": "src/Settings.pm",
+      "rationale": "Files containing character-independent, but server-specific information that OpenKore needs; read-mostly."
+    },
+    {
+      "id": "log_logging_framework",
+      "label": "Logging Framework",
+      "file_type": "document",
+      "source_file": "src/Log.pm",
+      "rationale": "Replaces limited print() with a classified, domain-based system allowing interception, color attachment, and filtered verbosity."
+    },
+    {
+      "id": "utils_pathfinding_logic",
+      "label": "Pathfinding Logic",
+      "file_type": "code",
+      "source_file": "src/Utils.pm",
+      "rationale": "Implements A* and Easy Path search to simulate client-side movement and check line-of-sight."
+    }
+  ],
+  "edges": [
+    {
+      "source": "settings_settings",
+      "target": "settings_control_files",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Settings.pm"
+    },
+    {
+      "source": "settings_settings",
+      "target": "settings_table_files",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Settings.pm"
+    },
+    {
+      "source": "log_log",
+      "target": "log_logging_framework",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Log.pm"
+    },
+    {
+      "source": "network_receive_network_receive",
+      "target": "log_log",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Receive.pm"
+    },
+    {
+      "source": "network_send_network_send",
+      "target": "log_log",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Send.pm"
+    },
+    {
+      "source": "network_receive_network_receive",
+      "target": "utils_utils",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Receive.pm"
+    },
+    {
+      "source": "network_send_network_send",
+      "target": "utils_utils",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Send.pm"
+    },
+    {
+      "source": "log_log",
+      "target": "utils_utils",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Log.pm"
+    },
+    {
+      "source": "network_receive_network_receive",
+      "target": "network_packetparser",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Receive.pm"
+    },
+    {
+      "source": "network_send_network_send",
+      "target": "network_packetparser",
+      "relation": "implements",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Send.pm"
+    },
+    {
+      "source": "utils_utils",
+      "target": "utils_pathfinding_logic",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Utils.pm"
+    },
+    {
+      "source": "network_receive_network_receive",
+      "target": "network_send_network_send",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "src/Network/Receive.pm"
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "network_subsystem",
+      "label": "Network Subsystem",
+      "nodes": [
+        "network_receive_network_receive",
+        "network_send_network_send",
+        "network_packetparser",
+        "globals_package"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/Receive.pm"
+    },
+    {
+      "id": "configuration_system",
+      "label": "Configuration System",
+      "nodes": [
+        "settings_settings",
+        "settings_control_files",
+        "settings_table_files",
+        "globals_package"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.95,
+      "source_file": "src/Settings.pm"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

@@ -1,0 +1,1 @@
+{"nodes": [{"id": "cpan_dependencies", "label": "CPAN Dependencies", "file_type": "document", "source_file": "src/deps/README.TXT", "source_location": null, "rationale": "Inclusion of third-party Perl modules from CPAN to provide a standalone installation environment without requiring users to manually install dependencies."}], "edges": [], "hyperedges": []}

@@ -1,0 +1,19 @@
+[Joker-RO]
+ip 45.154.24.25
+port 26151
+master_version 7
+version 55
+serverType kRO_RagexeRE_2021_11_03
+charBlockSize 175
+serverEncoding Thai
+addTableFolders tRO
+
+[DJ-RO]
+ip ro.djserver.win
+port 6900
+master_version 55
+version 55
+serverType kRO_RagexeRE_2021_11_03
+charBlockSize 175
+serverEncoding Western
+addTableFolders tRO

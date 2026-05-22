@@ -1,0 +1,168 @@
+{
+  "nodes": [
+    {
+      "id": "ai_ai",
+      "label": "AI Module",
+      "file_type": "code",
+      "source_file": "src/AI.pm"
+    },
+    {
+      "id": "ai_state",
+      "label": "AI::state",
+      "file_type": "code",
+      "source_file": "src/AI.pm"
+    },
+    {
+      "id": "ai_ai_seq",
+      "label": "@ai_seq",
+      "file_type": "code",
+      "source_file": "src/Globals.pm"
+    },
+    {
+      "id": "network_constate",
+      "label": "Connection State",
+      "file_type": "code",
+      "source_file": "src/Network.pm"
+    },
+    {
+      "id": "network_packetparser",
+      "label": "Network::PacketParser",
+      "file_type": "code",
+      "source_file": "src/Network/PacketParser.pm"
+    },
+    {
+      "id": "ai_corelogic_iterate",
+      "label": "AI::CoreLogic::iterate",
+      "file_type": "code",
+      "source_file": "src/AI/CoreLogic.pm"
+    },
+    {
+      "id": "globals_package",
+      "label": "Globals Module",
+      "file_type": "code",
+      "source_file": "src/Globals.pm"
+    },
+    {
+      "id": "ai_queue",
+      "label": "AI::queue",
+      "file_type": "code",
+      "source_file": "src/AI.pm"
+    },
+    {
+      "id": "ai_dequeue",
+      "label": "AI::dequeue",
+      "file_type": "code",
+      "source_file": "src/AI.pm"
+    },
+    {
+      "id": "network_packetparser_parse",
+      "label": "PacketParser::parse",
+      "file_type": "code",
+      "source_file": "src/Network/PacketParser.pm"
+    }
+  ],
+  "edges": [
+    {
+      "source": "ai_ai",
+      "target": "globals_package",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/AI.pm"
+    },
+    {
+      "source": "ai_corelogic_iterate",
+      "target": "ai_state",
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/AI/CoreLogic.pm"
+    },
+    {
+      "source": "ai_corelogic_iterate",
+      "target": "ai_ai_seq",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "src/AI/CoreLogic.pm"
+    },
+    {
+      "source": "ai_ai",
+      "target": "ai_ai_seq",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/AI.pm"
+    },
+    {
+      "source": "network_packetparser",
+      "target": "network_constate",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/PacketParser.pm"
+    },
+    {
+      "source": "network_packetparser_parse",
+      "target": "globals_package",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/Network/PacketParser.pm"
+    },
+    {
+      "source": "ai_queue",
+      "target": "ai_ai_seq",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/AI.pm"
+    },
+    {
+      "source": "ai_dequeue",
+      "target": "ai_ai_seq",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "src/AI.pm"
+    },
+    {
+      "source": "ai_corelogic_iterate",
+      "target": "network_packetparser",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.8,
+      "source_file": "src/AI/CoreLogic.pm"
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "ai_subsystem",
+      "label": "AI Subsystem",
+      "nodes": [
+        "ai_ai",
+        "ai_corelogic_iterate",
+        "ai_ai_seq"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.95,
+      "source_file": "src/AI/CoreLogic.pm"
+    },
+    {
+      "id": "network_subsystem",
+      "label": "Networking Subsystem",
+      "nodes": [
+        "network_constate",
+        "network_packetparser",
+        "network_packetparser_parse"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.95,
+      "source_file": "src/Network/PacketParser.pm"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

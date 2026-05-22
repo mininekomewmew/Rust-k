@@ -1,0 +1,1 @@
+{"nodes": [{"id": "test_portals", "label": "Portal Connection Test Data", "file_type": "code", "source_file": "src/test/portals.txt"}], "edges": [{"source": "test_portals", "target": "test_resnametable", "relation": "shares_data_with", "confidence": "INFERRED", "confidence_score": 0.9, "source_file": "src/test/portals.txt"}], "hyperedges": []}

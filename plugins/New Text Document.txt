@@ -1,0 +1,213 @@
+package WebStatus;
+
+use strict;
+use Plugins;
+use Globals;
+use Log qw(message error);
+use IO::Socket::INET;
+use File::Spec;
+use File::Path qw(make_path);
+
+our $server_socket;
+our $hooks;
+our $last_update = 0;
+our $last_retry = 0;
+our $status_dir = File::Spec->catdir($Settings::logs_folder || 'logs', 'webStatus');
+
+Plugins::register('webStatus', 'Web Status Plugin', \&onUnload);
+
+ $hooks = Plugins::addHooks(
+    ['start3', \&onStart, undef],
+    ['mainLoop_pre', \&onMainLoop, undef]
+);
+
+# Start listening immediately when plugin loads
+onStart();
+
+sub onUnload {
+    Plugins::delHooks($hooks);
+    if ($server_socket) {
+        $server_socket->close();
+    }
+    # Clean up our status file
+    if ($char) {
+        my $name = $char->name();
+        $name =~ s/[^a-zA-Z0-9_\-]//g;
+        my $file = File::Spec->catfile($status_dir, "$name.html");
+        unlink($file) if -f $file;
+    }
+}
+
+sub onStart {
+    return if $server_socket; # Already started
+    
+    $server_socket = IO::Socket::INET->new(
+        LocalHost => '127.0.0.1',
+        LocalPort => 47035,
+        Proto     => 'tcp',
+        Listen    => 5,
+        Reuse     => 1,
+        Blocking  => 0
+    );
+    
+    if (!$server_socket) {
+        # Don't show error every time if another bot is already hosting
+        # error "WebStatus: Could not create socket: $!\n";
+    } else {
+        message "WebStatus: Dashboard listening on http://localhost:47035/\n", "success";
+    }
+}
+
+sub onMainLoop {
+    my $now = time();
+
+    # Periodically write our own status
+    if ($now - $last_update >= 5) {
+        writeStatusFile();
+        $last_update = $now;
+    }
+
+    # Periodically try to take over the dashboard port if it's free
+    if (!$server_socket && $now - $last_retry >= 15) {
+        onStart();
+        $last_retry = $now;
+    }
+
+    return unless $server_socket;
+    
+    my $client_socket = $server_socket->accept();
+    if ($client_socket) {
+        $client_socket->blocking(0);
+        
+        # Read and discard request
+        my $request = "";
+        sysread($client_socket, $request, 2048);
+        
+        my $all_html = "";
+        if (-d $status_dir) {
+            opendir(my $dh, $status_dir);
+            while (my $f = readdir($dh)) {
+                next unless $f =~ /\.html$/;
+                my $path = File::Spec->catfile($status_dir, $f);
+                
+                # If file is older than 30 seconds, it's stale (bot crashed or closed)
+                if (-M $path < (30 / 86400)) {
+                    if (open(my $fh, '<', $path)) {
+                        local $/;
+                        $all_html .= <$fh>;
+                        close($fh);
+                    }
+                } else {
+                    unlink($path);
+                }
+            }
+            closedir($dh);
+        }
+
+        if (!$all_html) {
+            $all_html = "<div class='status-box'><h1>No bots logged in.</h1></div>";
+        }
+
+        my $html = <<HTML;
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenKore Web Status Dashboard</title>
+    <meta http-equiv="refresh" content="60">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+        h1 { color: #5a5a8c; border-bottom: 2px solid #5a5a8c; padding-bottom: 5px; margin-bottom: 15px; font-size: 1.2em; }
+        .status-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 300px; position: relative; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 3px; font-size: 0.9em; }
+        .stat-label { font-weight: bold; color: #555; }
+        .stat-val { color: #222; }
+        
+        /* Minimize Button Styles */
+        .toggle-btn { cursor: pointer; background: #5a5a8c; color: white; border: none; border-radius: 4px; padding: 2px 8px; font-size: 0.8em; position: absolute; top: 20px; right: 20px; }
+        .toggle-btn:hover { background: #777; }
+        
+        /* Class to hide elements when minimized */
+        .collapsed .collapsible { display: none; }
+    </style>
+    <script>
+        function toggleBox(btn) {
+            var box = btn.closest('.status-box');
+            if (box) {
+                box.classList.toggle('collapsed');
+                btn.textContent = box.classList.contains('collapsed') ? '[ + ]' : '[ - ]';
+            }
+        }
+    </script>
+</head>
+<body>
+    $all_html
+</body>
+</html>
+HTML
+
+        my $response = "HTTP/1.1 200 OK\r\n";
+        $response .= "Content-Type: text/html; charset=utf-8\r\n";
+        $response .= "Connection: close\r\n\r\n";
+        $response .= $html;
+        
+        $client_socket->blocking(1);
+        $client_socket->send($response);
+        $client_socket->close();
+    }
+}
+
+sub writeStatusFile {
+    return unless $char;
+    make_path($status_dir) unless -d $status_dir;
+    
+    my $name = $char->name();
+    my $safe_name = $name;
+    $safe_name =~ s/[^a-zA-Z0-9_\-]//g;
+    my $file = File::Spec->catfile($status_dir, "$safe_name.html");
+    
+    my $job = $jobs_lut{$char->{jobID}} || 'Novice';
+    my $b_lv = $char->{lv};
+    my $b_exp_now = $char->{exp} || 0;
+    my $b_exp_max = $char->{exp_max} || 1;
+    
+    my $j_lv = $char->{lv_job};
+    my $j_exp_now = $char->{exp_job} || 0;
+    my $j_exp_max = $char->{exp_job_max} || 1;
+    
+    my $zeny = $char->{zeny};
+    my $weight = $char->{weight};
+    my $weight_max = $char->{weight_max};
+    my $weight_pct = sprintf("%.1f", $char->weight_percent());
+    
+    my $map = $field ? $field->name() : 'Unknown';
+    my $bot_status = $AI::ai_seq[0] || 'Idle';
+    
+    my $fragment = <<HTML;
+    <div class="status-box">
+        <button class="toggle-btn" onclick="toggleBox(this)">[ - ]</button>
+        <h1>Bot: $name</h1>
+        
+        <!-- Visible always -->
+        <div class="stat-row"><span class="stat-label">Job</span> <span class="stat-val">$job</span></div>
+        
+        <!-- Hidden when minimized (collapsible) -->
+        <div class="stat-row collapsible"><span class="stat-label">Base Level</span> <span class="stat-val">$b_lv</span></div>
+        <div class="stat-row collapsible"><span class="stat-label">Base Exp</span> <span class="stat-val">$b_exp_now / $b_exp_max</span></div>
+        <div class="stat-row collapsible"><span class="stat-label">Job Level</span> <span class="stat-val">$j_lv</span></div>
+        <div class="stat-row collapsible"><span class="stat-label">Job Exp</span> <span class="stat-val">$j_exp_now / $j_exp_max</span></div>
+        <div class="stat-row collapsible"><span class="stat-label">Zeny</span> <span class="stat-val">$zeny</span></div>
+        <div class="stat-row collapsible"><span class="stat-label">Weight</span> <span class="stat-val">$weight / $weight_max ($weight_pct%)</span></div>
+        
+        <!-- Visible always -->
+        <div class="stat-row"><span class="stat-label">Map</span> <span class="stat-val">$map</span></div>
+        <div class="stat-row"><span class="stat-label">AI Status</span> <span class="stat-val">$bot_status</span></div>
+    </div>
+HTML
+
+    if (open(my $fh, '>', $file)) {
+        print $fh $fragment;
+        close($fh);
+    }
+}
+
+1;
