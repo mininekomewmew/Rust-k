@@ -99,6 +99,34 @@ our %items_lut;
 our %itemSlotCount_lut;
 our %itemsDesc_lut;
 our %itemTypes_lut;
+our %itemHandType_lut;
+our %handEquipTypeAliases = map { $_ => 1 } qw(
+	Shield
+	Fist
+	Dagger
+	1hSword
+	2hSword
+	1hSpear
+	2hSpear
+	1hAxe
+	2hAxe
+	Mace
+	2hMace
+	Staff
+	Bow
+	Knuckle
+	Musical
+	Whip
+	Book
+	Katar
+	Revolver
+	Rifle
+	Gatling
+	Shotgun
+	Grenade
+	Huuma
+	2hStaff
+);
 our %itemSlots_lut;
 our %itemOption_lut;
 our %itemOptionHandle;

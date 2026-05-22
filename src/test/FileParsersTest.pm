@@ -60,6 +60,79 @@ sub start {
 			done_testing();
 		};
 
+		subtest 'npc_shops.txt' => sub {
+			my ($fh, $filename) = tempfile();
+			print {$fh} join("\n",
+				'npcmap,npcx,npcy,item1id:item1price,item2id:item2price,etc',
+				'prontera,100,200,501:10,502:50,503:180',
+				'alberta_in,182,97,611:40',
+				'ignoreme,bad,x,501:10',
+			) . "\n";
+			close $fh;
+
+			my %npc_shops;
+			parseNPCShops($filename, \%npc_shops);
+
+			is_deeply([sort keys %npc_shops], ['list'], 'stores only list structure for npc shops');
+			is(scalar @{$npc_shops{list}}, 2, 'parses valid shop rows only');
+			is($npc_shops{list}[0]{map}, 'prontera', 'parses map');
+			is($npc_shops{list}[0]{x}, 100, 'parses x');
+			is($npc_shops{list}[0]{y}, 200, 'parses y');
+			is(scalar @{$npc_shops{list}[0]{items}}, 3, 'parses item list');
+			is($npc_shops{list}[0]{items}[1]{itemID}, 502, 'parses item ID');
+			is($npc_shops{list}[0]{items}[1]{price}, 50, 'parses item price');
+			is($npc_shops{list}[0]{itemsByID}{503}, 180, 'builds itemsByID lookup');
+			is($npc_shops{list}[1]{map}, 'alberta_in', 'keeps basename-normalized map names');
+
+			unlink $filename;
+			done_testing();
+		};
+
+		subtest 'npc_shops_instance_map_normalization' => sub {
+			my ($fh, $filename) = tempfile();
+			print {$fh} "0021\@cata,20,30,602:1000\n";
+			close $fh;
+
+			my %npc_shops;
+			parseNPCShops($filename, \%npc_shops);
+
+			is($npc_shops{list}[0]{map}, '1@cata', 'normalizes instance map names through Field::nameToBaseName');
+
+			unlink $filename;
+			done_testing();
+		};
+
+		subtest 'updateNPCShopFile' => sub {
+			my ($fh, $filename) = tempfile();
+			print {$fh} join("\n",
+				'npcmap,npcx,npcy,item1id:item1price,item2id:item2price,etc',
+				'prontera,100,200,501:10,502:50',
+				'alberta_in,182,97,611:40',
+			) . "\n";
+			close $fh;
+
+			updateNPCShopFile($filename, 'prontera', 100, 200, [
+				{itemID => 501, price => 12},
+				{itemID => 503, price => 180},
+			]);
+			updateNPCShopFile($filename, 'geffen', 50, 60, [
+				{itemID => 601, price => 99},
+			]);
+			updateNPCShopFile($filename, 'alberta_in', 182, 97, []);
+
+			my %npc_shops;
+			parseNPCShops($filename, \%npc_shops);
+
+			is(scalar @{$npc_shops{list}}, 2, 'updates existing shops, appends new shops, and removes emptied shops');
+			is($npc_shops{list}[0]{itemsByID}{501}, 12, 'replaces stale prices for existing shops');
+			is($npc_shops{list}[0]{itemsByID}{503}, 180, 'writes updated item lists for existing shops');
+			is($npc_shops{list}[1]{map}, 'geffen', 'adds new shop rows when missing');
+			is($npc_shops{list}[1]{items}[0]{price}, 99, 'stores new shop price');
+
+			unlink $filename;
+			done_testing();
+		};
+
 		subtest 'pickupitems.txt' => sub {
 			parseDataFile_lc('pickupitems.txt', \%pickupitems);
 

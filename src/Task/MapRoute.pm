@@ -436,14 +436,16 @@ sub iterate {
 
 		} elsif ($dist_to_npc <= $max_npc_dist) {
 			my ($from,$to) = split /=/, $self->{mapSolution}[0]{portal};
-			if (($self->{actor}{zeny} >= $portals_lut{$from}{dest}{$to}{cost}) || ($char->inventory->getByNameID(7060) && $portals_lut{$from}{dest}{$to}{allow_ticket})) {
+			my $portalCost = hashSafeGetValue(\%portals_lut, $from, 'dest', $to, 'cost') || 0;
+			my $allowTicket = hashSafeGetValue(\%portals_lut, $from, 'dest', $to, 'allow_ticket') || 0;
+			if (($self->{actor}{zeny} >= $portalCost) || ($char->inventory->getByNameID(7060) && $allowTicket)) {
 				debug TF("[mapRoute] Calling setNpcTalk to teleport using NPC at %s (%s,%s) - dest (%s %s,%s).\n", $field->baseName, $self->{mapSolution}[0]{pos}{x}, $self->{mapSolution}[0]{pos}{y}, $self->{dest}{map}, $self->{dest}{pos}{x}, $self->{dest}{pos}{y}), "route";
 				# We have enough money for this service.
 				$self->setNpcTalk();
 
 			} else {
 				error TF("You need %sz to pay for warp service at %s (%s,%s), you have %sz.\n",
-					$portals_lut{$from}{dest}{$to}{cost},
+					$portalCost,
 					$field->baseName, $self->{mapSolution}[0]{pos}{x}, $self->{mapSolution}[0]{pos}{y},
 					$self->{actor}{zeny}), "map_route";
 					AI::clear(qw/move route mapRoute/);

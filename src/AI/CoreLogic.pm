@@ -462,14 +462,14 @@ sub processDrop {
 }
 
 ##### PORTALREADD #####
-# Automatically adds the last missing portals to portals_lut
+# Automatically restores the last temporarily removed route source.
 sub processReAddMissingPortals {
 	return unless ($config{route_reAddMissingPortals});
 	return unless (@portals_lut_missed);
 	return unless (timeOut($portals_lut_missed[0]{time}, $timeout{ai_portal_re_add_missed}{timeout}));
 	my $portal = shift(@portals_lut_missed);
-	$portals_lut{$portal->{name}} = $portal->{portal};
-	debug "Re adding portal '".$portal->{name}."' to portals list.\n", "portalReAdd";
+	Misc::restoreSuspendedRouteSource($portal);
+	debug "Re adding route source '".$portal->{name}."' to portals list.\n", "portalReAdd";
 }
 
 ##### PORTALRECORD #####
@@ -2591,17 +2591,19 @@ sub processFollow {
 
 			if ($args->{following} && $player->{pos_to}) {
 				my $dist = blockDistance($char->{pos_to}, $player->{pos_to});
-				if ($dist > $config{followDistanceMax} && timeOut($args->{move_timeout}, 0.25)) {
-					$args->{move_timeout} = time;
-					$args->{masterLastMoveTime} = $player->{time_move};
-
-					ai_route(
-						$field->baseName,
-						$player->{pos_to}{x},
-						$player->{pos_to}{y},
-						attackOnRoute => 1,
-						isFollow => 1,
-						distFromGoal => $config{followDistanceMin}
+				if ($dist > $config{followDistanceMax} && timeOut($args->{move_timeout}, 0.5)) {
+					start_follow(
+						$args,
+						pos_to => $player->{pos_to},
+						time_move => $player->{time_move},
+						master_map => $field->baseName,
+						route_map => $field->baseName,
+						allow_direct_move => 1,
+						route_args => {
+							attackOnRoute => 1,
+							isFollow => 1,
+							distFromGoal => $config{followDistanceMin}
+						}
 					);
 				}
 			}
@@ -3110,11 +3112,9 @@ sub processMonsterSkillUse {
 		while ($config{$prefix}) {
 			# monsterSkill can be used on any monster that we could
 			# attackAuto
-			my @monsterIDs = ai_getAggressives(1, 1);
-			for my $monsterID (@monsterIDs) {
-				my $monster = $monsters{$monsterID};
-				if (checkSelfCondition($prefix)
-				    && checkMonsterCondition("${prefix}_target", $monster)) {
+			for my $monster (@$monstersList) {
+				my $monsterID = $monster->{ID};
+				if (checkSelfCondition($prefix) && checkMonsterCondition("${prefix}_target", $monster)) {
 					my $skill = new Skill(auto => $config{$prefix});
 
 					next if $config{"${prefix}_maxUses"} && $monster->{skillUses}{$skill->getHandle()} >= $config{"${prefix}_maxUses"};
@@ -3123,7 +3123,7 @@ sub processMonsterSkillUse {
 					my $lvl = $config{"${prefix}_lvl"} || $char->getSkillLevel($skill);
 					my $maxCastTime = $config{"${prefix}_maxCastTime"};
 					my $minCastTime = $config{"${prefix}_minCastTime"};
-					debug "Auto-monsterSkill on $monster->{name} ($monster->{binID}): ".$skill->getName()." (lvl $lvl)\n", "monsterSkill";
+					message "Auto-monsterSkill on $monster->{name} ($monster->{binID}): ".$skill->getName()." (lvl $lvl)\n", "monsterSkill";
 					# FIXME: $skill->getOwner (homun, merc) instead of $char?
 					my $target = $config{"${prefix}_isSelfSkill"} ? $char : $monster;
 					ai_skillUse2($skill, $lvl, $maxCastTime, $minCastTime, $target, $prefix);
@@ -4060,7 +4060,11 @@ sub processPartyShareAuto {
 	if (timeOut($timeout{ai_partyShareCheck})) {
 		if (!exists($char->{party}{shareTimes})) { $char->{party}{shareTimes} = 1; }
 
-		if (($config{partyAutoShare} || $config{partyAutoShareItem} || $config{partyAutoShareItemDiv}) && $char->{party}{joined} && ($char->{party}{share} ne $config{partyAutoShare} || $char->{party}{itemPickup} ne $config{partyAutoShareItem} || $char->{party}{itemDivision} ne $config{partyAutoShareItemDiv})) {
+		if (
+			   ($config{partyAutoShare} || $config{partyAutoShareItem} || $config{partyAutoShareItemDiv})
+			&& $char->{party}{joined}
+			&& ($char->{party}{share} ne $config{partyAutoShare} || $char->{party}{itemPickup} ne $config{partyAutoShareItem} || $char->{party}{itemDivision} ne $config{partyAutoShareItemDiv})
+		) {
 			$messageSender->sendPartyOption($config{partyAutoShare}, $config{partyAutoShareItem}, $config{partyAutoShareItemDiv});
 			$char->{party}{shareTimes}++;
 			if ($char->{party}{shareTimes} > 5) {

@@ -4066,6 +4066,8 @@ sub monster_typechange {
 		$monster->{nameID} = $type;
 		$monster->{dmgToParty} = 0;
 		$monster->{dmgFromParty} = 0;
+		$monster->{castOnToParty} = 0;
+		$monster->{castOnByParty} = 0;
 		$monster->{missedToParty} = 0;
 		message TF("Monster %s (%d) changed to %s\n", $oldName, $monster->{binID}, $monster->name);
 	}
@@ -7602,6 +7604,8 @@ sub npc_store_info {
 	my $msg = $args->{RAW_MSG};
 	my $pack;
 	my $keys;
+	my $npc_id = $ai_v{'npc_talk'}{'ID'} || $talk{ID};
+	my @shop_items;
 
 	if ($args->{switch} eq '0B77') {
 		$pack = "V3 C v V";
@@ -7631,9 +7635,15 @@ sub npc_store_info {
 
 		$item->{name} = itemName($item);
 		$storeList->add($item);
+		push @shop_items, {
+			itemID => int($item->{nameID}),
+			price  => int($item->{price}),
+		};
 
 		debug "Item added to Store: $item->{name} - $item->{price}z\n", "parseMsg", 2;
 	}
+
+	update_npc_shop_cache($npc_id, \@shop_items);
 
 	$ai_v{'npc_talk'}{talk} = 'store';
 	# continue talk sequence now

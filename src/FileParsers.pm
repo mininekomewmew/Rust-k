@@ -47,8 +47,11 @@ our @EXPORT = qw(
 	parseDataFile2
 	parseEmotionsFile
 	parseItemsControl
+	parseItemHandTypeTable
 	parseList
 	parseNPCs
+	parseNPCShops
+	parseNoTeleportMaps
 	parseMonControl
 	parsePortals
 	parsePortalsLOS
@@ -78,6 +81,7 @@ our @EXPORT = qw(
 	updatePortalLUT
 	updatePortalLUT2
 	updateNPCLUT
+	updateNPCShopFile
 );
 
 ##
@@ -474,6 +478,33 @@ sub parseList {
 	return 1;
 }
 
+sub parseNoTeleportMaps {
+	my ($file, $r_hash) = @_;
+
+	%{$r_hash} = ();
+	my $reader = new Utils::TextReader($file);
+	while (!$reader->eof()) {
+		my $line = $reader->readLine();
+		$line =~ s/\x{FEFF}//g;
+		$line =~ s/[\r\n]//g;
+		$line =~ s/^\s+|\s+$//g;
+		next if ($line eq '' || $line =~ /^#/);
+
+		my ($map, $noteleport, $noreturn) = split /\s+/, $line, 3;
+		next unless defined $map && $map ne '';
+
+		# Allow a header row like: map noteleport noreturn
+		next if (lc($map) eq 'map' && defined $noteleport && lc($noteleport) eq 'noteleport');
+
+		$r_hash->{lc $map} = {
+			noteleport => ($noteleport // 0) ? 1 : 0,
+			noreturn   => ($noreturn   // 0) ? 1 : 0,
+		};
+	}
+
+	return 1;
+}
+
 ##
 # parseShopControl(file, shop)
 # file: Filename to parse
@@ -618,6 +649,71 @@ sub parseNPCs {
 		next unless $name;
 		$$r_hash{"$map $x $y"} = $name;
 	}
+	return 1;
+}
+
+sub parseNPCShops {
+	my ($file, $r_hash) = @_;
+
+	%{$r_hash} = ();
+	$r_hash->{list} = [];
+	my $field_loaded = eval { require Field; 1 };
+
+	my $reader = new Utils::TextReader($file);
+	while (!$reader->eof()) {
+		my $line = $reader->readLine();
+		$line =~ s/\x{FEFF}//g;
+		$line =~ s/[\r\n]//g;
+		$line =~ s/^\s+|\s+$//g;
+		next if ($line eq '' || $line =~ /^#/);
+		next if $line =~ /^npcmap,npcx,npcy,/i;
+
+		my ($map, $x, $y, @item_specs) = split /,/, $line;
+		if (!(defined $map && defined $x && defined $y && @item_specs)) {
+			warning TF("[parseNPCShops] Skipping malformed shop line in %s: %s\n", $file, $line);
+			next;
+		}
+		if (!($x =~ /^-?\d+$/ && $y =~ /^-?\d+$/)) {
+			warning TF("[parseNPCShops] Skipping shop line with invalid coordinates in %s: %s\n", $file, $line);
+			next;
+		}
+
+		my $original_map = $map;
+		$map = (Field::nameToBaseName(undef, $map))[0] if $field_loaded && defined $map;
+		debug TF("[parseNPCShops] Normalized map '%s' -> '%s' for line: %s\n", $original_map, $map, $line), "parseMsg", 2
+			if defined $original_map && defined $map && $original_map ne $map;
+
+		my @items;
+		my %items_by_id;
+		for my $item_spec (@item_specs) {
+			if (!(defined $item_spec && $item_spec =~ /^(\d+):(-?\d+)$/)) {
+				warning TF("[parseNPCShops] Ignoring malformed item spec '%s' in %s line: %s\n",
+					(defined $item_spec ? $item_spec : 'undef'), $file, $line);
+				next;
+			}
+
+			my $item = {
+				itemID => int($1),
+				price  => int($2),
+			};
+			push @items, $item;
+			$items_by_id{$item->{itemID}} = $item->{price};
+		}
+
+		if (!@items) {
+			warning TF("[parseNPCShops] Skipping shop line with no valid items in %s: %s\n", $file, $line);
+			next;
+		}
+
+		push @{$r_hash->{list}}, {
+			map       => $map,
+			x         => int($x),
+			y         => int($y),
+			items     => \@items,
+			itemsByID => \%items_by_id,
+		};
+	}
+
 	return 1;
 }
 
@@ -767,6 +863,7 @@ sub parsePortalsAirship {
 	my $r_array = shift;
 	undef %{$r_hash};
 	undef @{$r_array};
+	Log::debug("[parsePortals] Loading portals file: $file\n", "calc_map_route");
 	my $reader = new Utils::TextReader($file);
 	while (!$reader->eof()) {
 		my $line = $reader->readLine();
@@ -1602,6 +1699,73 @@ sub updateNPCLUT {
 	open FILE, ">>:utf8", $file;
 	print FILE "$location $name\n";
 	close FILE;
+}
+
+sub updateNPCShopFile {
+	my ($file, $map, $x, $y, $items) = @_;
+	return unless defined $file && defined $map && defined $x && defined $y;
+	return unless $x =~ /^-?\d+$/ && $y =~ /^-?\d+$/;
+	my $field_loaded = eval { require Field; 1 };
+	$map = (Field::nameToBaseName(undef, $map))[0] if $field_loaded && defined $map;
+
+	my @serialized_items;
+	for my $item (@{$items || []}) {
+		next unless $item && defined $item->{itemID} && defined $item->{price};
+		next unless $item->{itemID} =~ /^\d+$/ && $item->{price} =~ /^-?\d+$/;
+		push @serialized_items, int($item->{itemID}) . ':' . int($item->{price});
+	}
+
+	return if !-f $file && !@serialized_items;
+
+	my $header = 'npcmap,npcx,npcy,item1id:item1price,item2id:item2price,etc';
+	my $updated_line = join(',', $map, int($x), int($y), @serialized_items);
+	my @lines;
+
+	if (-f $file && open(my $fh, '<:utf8', $file)) {
+		@lines = <$fh>;
+		close $fh;
+	}
+
+	my @output;
+	my $has_header = 0;
+	my $updated = 0;
+
+	for my $line (@lines) {
+		$line =~ s/[\r\n]+$//;
+
+		my $compare = $line;
+		$compare =~ s/\x{FEFF}//g;
+
+		if ($compare =~ /^npcmap,npcx,npcy,/i) {
+			next if $has_header;
+			$has_header = 1;
+			push @output, $line;
+			next;
+		}
+
+		my ($existing_map, $existing_x, $existing_y) = split /,/, $compare, 4;
+		if (
+			defined $existing_map && defined $existing_x && defined $existing_y
+			&& $existing_map eq $map
+			&& $existing_x =~ /^-?\d+$/ && $existing_y =~ /^-?\d+$/
+			&& int($existing_x) == int($x) && int($existing_y) == int($y)
+		) {
+			if (!$updated && @serialized_items) {
+				push @output, $updated_line;
+			}
+			$updated = 1;
+			next;
+		}
+
+		push @output, $line;
+	}
+
+	unshift @output, $header unless $has_header;
+	push @output, $updated_line if @serialized_items && !$updated;
+
+	open(my $fh, '>:utf8', $file) or return;
+	print {$fh} join("\n", @output) . "\n";
+	close $fh;
 }
 
 1;

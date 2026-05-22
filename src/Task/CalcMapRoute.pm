@@ -84,8 +84,8 @@ sub new {
 	$self->{source}{map} = $self->{source}{field}->baseName;
 	$self->{source}{x} = defined($args{sourceX}) ? $args{sourceX} : $char->{pos_to}{x};
 	$self->{source}{y} = defined($args{sourceY}) ? $args{sourceY} : $char->{pos_to}{y};
-	$self->{targets} = $args{targets};
-	$_->{map} = ( Field::nameToBaseName( undef, $_->{map} ) )[0] foreach @{ $args{targets} };
+	$self->{targets} = [map { { %$_ } } @{ $args{targets} }];
+	$_->{map} = ( Field::nameToBaseName( undef, $_->{map} ) )[0] foreach @{ $self->{targets} };
 	if ($args{budget} ne '') {
 		$self->{budget} = $args{budget};
 	} elsif ($config{route_maxWarpFee} ne '') {
@@ -144,21 +144,38 @@ sub iterate {
 	if ($self->{stage} == INITIALIZE) {
 		my $openlist = $self->{openlist};
 		my $closelist = $self->{closelist};
-		foreach ( @{ $self->{targets} } ) {
-			$_->{field} = eval { Field->new( name => $_->{map} ) };
+		my $sourceNode = "$self->{source}{map} $self->{source}{x} $self->{source}{y}";
+		my $initialBaseCost = { walk => 0, zeny => 0, amount_of_tickets_used => 0 };
+		my @validTargets;
+		foreach my $target ( @{ $self->{targets} } ) {
+			$target->{field} = eval { Field->new( name => $target->{map} ) };
 			if ( caught( 'FileNotFoundException', 'IOException' ) ) {
-				$self->setError( CANNOT_LOAD_FIELD, TF( "Cannot load field '%s'.", $_->{map} ) );
-				return;
+				debug sprintf(
+					"CalcMapRoute - skipping unloadable target '%s'%s.\n",
+					$target->{map},
+					defined $target->{x} && defined $target->{y} ? " ($target->{x},$target->{y})" : ''
+				), "calc_map_route" if $self->shouldLogDebug();
+				next;
 			} elsif ( $@ ) {
 				die $@;
 			}
+			push @validTargets, $target;
+		}
 
+		if ( !@validTargets ) {
+			$self->setError( CANNOT_LOAD_FIELD, TF( "Cannot load field '%s'.", $self->{targets}[0]{map} ) );
+			return;
+		}
+
+		$self->{targets} = \@validTargets;
+
+		foreach my $target ( @{ $self->{targets} } ) {
 			# Check whether destination is walkable from the starting point.
-			if ( $self->{source}{map} eq $_->{map} && Task::Route->getRoute( undef, $_->{field}, $self->{source}, $_, 0 ) ) {
+			if ( $self->{source}{map} eq $target->{map} && Task::Route->getRoute( undef, $target->{field}, $self->{source}, $target, 0 ) ) {
 				$self->{mapSolution} = [];
-				$self->{target} = $_;
-				$self->{target}->{pos}->{x} = $_->{x};
-				$self->{target}->{pos}->{y} = $_->{y};
+				$self->{target} = $target;
+				$self->{target}->{pos}->{x} = $target->{x};
+				$self->{target}->{pos}->{y} = $target->{y};
 				$self->setDone();
 				return;
 			}
