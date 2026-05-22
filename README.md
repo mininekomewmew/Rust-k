@@ -1,110 +1,60 @@
-![logo](https://upload.wikimedia.org/wikipedia/commons/b/b5/Kore_2g_logo.png)
+# HybridKore (OpenKore + Rust Core)
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/OpenKore/openkore)
+![Language](https://img.shields.io/badge/language-Perl%20%2B%20Rust-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)
 
-![Language](https://img.shields.io/badge/language-Perl-blue.svg)
+HybridKore เป็นระบบผู้ช่วยอัตโนมัติ (Bot) สำหรับ Ragnarok Online ที่ถูกพัฒนาต่อยอดจาก OpenKore ดั้งเดิม โดยผสานการทำงานร่วมกับ **Rust** เพื่อเพิ่มประสิทธิภาพในการประมวลผลเครือข่ายและการรับส่งข้อมูล (IPC Bridge)
 
-![Stars](https://img.shields.io/github/stars/OpenKore/openkore)
-![Fork](https://img.shields.io/github/forks/OpenKore/openkore?label=Fork)
-![Watch](https://img.shields.io/github/watchers/OpenKore/openkore?label=Watch)
+⚠️ **สำคัญมาก:** โปรเจกต์นี้เป็นการเปลี่ยนโครงสร้างสถาปัตยกรรมใหม่ทั้งหมด กรุณา **ลบไฟล์ OpenKore ตัวเก่าทิ้งทั้งหมด** ก่อนทำการติดตั้งตัวนี้ เพื่อป้องกันปัญหาโค้ดชนกันหรือทำงานผิดพลาด!
 
-![Issues](https://img.shields.io/github/issues/OpenKore/openkore)
-![Pull Requests](https://img.shields.io/github/issues-pr/OpenKore/openkore.svg)
-![Contributors](https://img.shields.io/github/contributors/OpenKore/openkore.svg)
+---
 
-![Github_Workflow_status](https://img.shields.io/github/actions/workflow/status/OpenKore/openkore/build_XSTools.yml?branch=master)
-![Github_Workflow_CI](https://github.com/OpenKore/openkore/actions/workflows/build_XSTools.yml/badge.svg)
+## 🛠️ สิ่งที่ต้องเตรียม (Prerequisites)
 
-* OpenKore is a custom client and intelligent automated assistant for Ragnarok Online.
-* It is a **free**, open source and cross-platform program _(Linux, Windows and MacOS are supported)_.
+เนื่องจากระบบแกนหลักบางส่วนถูกเขียนด้วยภาษา Rust คุณจำเป็นต้องติดตั้ง Rust Compiler บน Windows ก่อนถึงจะใช้งานได้
 
-## Prerequisites
+### วิธีการติดตั้ง Rust บน Windows
+1. ไปที่เว็บไซต์ทางการของ Rust: [https://rustup.rs/](https://rustup.rs/)
+2. โหลดไฟล์ `rustup-init.exe` สำหรับ Windows
+3. รันไฟล์ `rustup-init.exe` ที่โหลดมา
+   - ระบบอาจจะแจ้งให้คุณติดตั้ง **Visual Studio C++ Build tools** ก่อน (ถ้าเครื่องยังไม่มี) ให้กดอนุญาตและติดตั้งให้เรียบร้อย
+   - เมื่อหน้าจอ Command Prompt สีดำเด้งขึ้นมา ให้พิมพ์ `1` แล้วกด Enter เพื่อติดตั้งด้วยค่าเริ่มต้น (Default installation)
+4. รอจนกว่าระบบจะดาวน์โหลดและติดตั้งเสร็จสิ้น (จะขึ้นข้อความว่า *Rust is installed now. Great!*)
+5. ปิดหน้าจอ Command Prompt
 
-To run OpenKore you will need:
-* [Read the Requirements page on our wiki](https://openkore.com/wiki/How_to_run_OpenKore#Requirements)
+---
 
-## Quickstart
+## 🚀 วิธีการติดตั้งและใช้งาน (Quickstart)
 
-1. [Download OpenKore](https://github.com/OpenKore/openkore/archive/master.zip) and extract it. Alternatively, you could press the **Windows Key + R**, type in ``cmd`` & enter. Run the following command in the cmd to clone.
-***Note: [Git](https://git-scm.com/) required.***
-```
-git clone https://github.com/OpenKore/openkore.git
-```
+1. **ทำความสะอาดบ้านเก่า:** 
+   - ลบโฟลเดอร์ OpenKore ตัวเก่าของคุณทิ้งให้หมด (แนะนำให้แบ็คอัพโฟลเดอร์ `control` ของคุณไว้ที่อื่นก่อนเผื่อต้องใช้ตั้งค่าเดิม)
+   
+2. **ดาวน์โหลด HybridKore:**
+   - โหลดโปรเจกต์นี้ลงมาที่เครื่องของคุณ หรือใช้คำสั่ง Git Clone (ต้องมี [Git](https://git-scm.com/)):
+   ```bash
+   git clone https://github.com/mininekomewmew/Rust-k.git
+   ```
 
-2. Configure OpenKore: [documentation](https://openkore.com/wiki/Category:control).
-3. Run openkore.pl _(You can run start.exe or wxstart.exe if you use Windows)_.
+3. **ตั้งค่าระบบ:**
+   - เข้าไปตั้งค่าบอทของคุณที่โฟลเดอร์ `control` เช่นเดียวกับ OpenKore ปกติ
 
-## F.A.Q. (Frequently Asked Questions)
-<!-- Source: https://forums.openkore.com/viewtopic.php?f=0&t=11287 -->
- 1. **Have a problem?**
-    - Update your openkore or download a new one.
- 2. **Still having problems?**
-    - Search in [Wiki](https://openkore.com/wiki/).
-    - Search in [Forum](https://forums.openkore.com/).
-    - Search in [Github issues](https://github.com/openkore/openkore/issues?utf8=%E2%9C%93&q=).
- 3. **Cant find what you need? / Do not understand?**
-    - Ask in [Discord](https://discord.com/invite/hdAhPM6).
- 4. **Is it a problem in Openkore?**
-    - Read [things to know](https://github.com/OpenKore/openkore#things-to-know) before [reporting](https://github.com/OpenKore/openkore/issues/new).
+4. **การรันบอท (Run):**
+   - รันโปรแกรมผ่าน `start.exe` หรือ `wxstart.exe` เหมือนเดิม (ระบบจะทำการเชื่อมต่อกับแกน Rust โดยอัตโนมัติตามที่ตั้งค่า IPC ไว้)
 
-## Things to know
+---
 
-* Make sure you've read [FAQ](https://github.com/OpenKore/openkore#faq-frequently-asked-questions) especially to [run latest commit on master branch](https://github.com/OpenKore/openkore/commits/master) & checking [existed issue for your request.](https://github.com/OpenKore/openkore/issues?utf8=%E2%9C%93&q=)
-* Please post in English.
-* Please use the issue template.
-* Please include informations about your server & any changes you did in your configuration.
-* Briefly explain what happened, take a screenhot & include the error message _(If available)_.
-* Please be advised any developers here are doing this on their free time. Please give some time for anyone to respond.
+## ❓ F.A.Q. (คำถามที่พบบ่อย)
 
-## Status of botting on Official Servers
+**Q: ทำไมต้องเปลี่ยนมาใช้ Rust?**
+A: Rust ช่วยเพิ่มความเร็วและความปลอดภัยในการประมวลผลระดับลึก (เช่น การอ่าน Packet และ Network) ทำให้บอทสามารถทำงานได้เสถียรขึ้นและกินทรัพยากรน้อยลงในระยะยาว
 
-| Server | Description | Protection | Status | Supporter |
-| --- | --- | --- | --- | --- |
-| [aRO Baphomet](https://www.gnjoy.asia/) | Asia RO | CheatDefender | Not working | N/A |
-| [bRO](https://playragnarokonlinebr.com/) | Brazil RO | EAC | Not working | N/A |
-| [cRO](https://ro.zhaouc.com/) | China RO | nProtect | Not working | N/A |
-| [euRO Prime](https://eu.4game.com/roprime/) | Europe RO | Frost Security | Not working | N/A |
-| [iRO Сhaos/Thor/Freya](http://renewal.playragnarok.com/) | International RO | EAC | Not working | N/A |
-| [idRO Classic](https://roclassic.gnjoy.id/) | Indonesia RO | nProtect | Not Working | N/A |
-| [idRO Yggdrasil](https://ro.gnjoy.id/) | Indonesia RO (Forever Love) | EAC | Not Working | N/A |
-| [jRO](https://ragnarokonline.gungho.jp/) | Japan RO | nProtect | Not working | N/A |
-| [kRO](http://ro.gnjoy.com/) | Korea RO | nProtect | Not working | N/A |
-| [kRO Zero](http://roz.gnjoy.com/) | Korea RO | nProtect | Not working | N/A |
-| [ROla](https://www.gnjoylatam.com/) | Latam RO | nProtect | Not working | N/A |
-| [ruRO Prime](https://ru.4game.com/roprime/) | Russia RO | Frost Security | Not Working | ya4ept |
-| [tRO Chaos/Thor](https://ro.gnjoy.in.th/) | Thailand RO (Online) | nProtect | Not Working | N/A |
-| [tRO Classic](https://roc.gnjoy.in.th/) | Thailand RO (Classic) | nProtect | Not Working | N/A |
-| [tRO Baphomet](https://rolth.maxion.gg/) | Thailand (Landverse) | Custom | Not Working | N/A |
-| [tRO Baphomet](https://rolg.maxion.gg/) | Thailand (Landverse Genesis) | Custom | Not Working | N/A |
-| [twRO](https://ro.gnjoy.com.tw/) | Taiwan RO | CheatDefender | Not Working | N/A |
+**Q: ไฟล์ `control/config.txt` เดิมยังใช้ได้ไหม?**
+A: ใช้ได้! แต่แนะนำให้ตรวจสอบการตั้งค่าบางตัวที่อาจเปลี่ยนไปในอัปเดตล่าสุด
 
-## Contributing
+**Q: รันแล้วขึ้น Error เกี่ยวกับ Rust?**
+A: ตรวจสอบให้แน่ใจว่าคุณได้ติดตั้ง Rust และรีสตาร์ทคอมพิวเตอร์อย่างน้อย 1 ครั้ง เพื่อให้ Environment Variables ทำงานได้อย่างสมบูรณ์
 
-OpenKore is developed by a [team](https://github.com/OpenKore/openkore/graphs/contributors) located around the world. Check out the [documentation](https://openkore.com/wiki/Manual) and if necessary, submit a pull request.
+---
 
-## Contacts
-
-* [OpenKore Wiki](https://openkore.com/wiki/)
-* [OpenKore forum](https://forums.openkore.com/)
-* [Discord](https://discord.com/invite/hdAhPM6)
-* [Russian Community](https://RO-fan.ru/)
-
-## **Warning**
-
-Other communities or websites are not affiliated to openkore.com
-
-## Other Links
-
-1. [Openkore History](https://openkore.com/wiki/OpenKore)
-2. [Legacy Changelog](https://github.com/OpenKore/openkore/blob/master/LegacyChangelog.md)
-3. [Openkore RoadMap](https://openkore.com/wiki/roadmap)
-4. [Feature Requests and TODO Wiki](https://openkore.com/wiki/Category:Feature_Request) and [Feature Requests GitHub](https://github.com/OpenKore/openkore/issues?q=is%3Aopen+is%3Aissue+label%3A%22feature+request%22)
-
-## License
-
-This software is open source, licensed under the GNU General Public License, version 2.
-Basically, this means that you're free to use and allowed to modify and distribute this software.
-However, if you distribute modified versions, you **MUST** also distribute the source code.
-
-
-See https://www.gnu.org/licenses/gpl-3.0.html for the full license.
+## 📜 License
+This software is based on OpenKore and follows the GNU General Public License, version 2.
