@@ -19,6 +19,8 @@ sub new {
 	my ($class) = @_;
 	my $self = $class->SUPER::new(@_);
 
+	$self->{packet_list}{'0840'} = ['notify_accessible_mapname', 'v a*', [qw(len mapList)]];
+
 	return $self;
 }
 

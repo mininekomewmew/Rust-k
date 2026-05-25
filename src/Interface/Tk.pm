@@ -1504,6 +1504,7 @@ sub parsePortals {
 	foreach my $portal (keys %portals_lut) {
 		foreach my $dest (keys %{$portals_lut{$portal}{dest}}) {
 			next if $portals_lut{$portal}{dest}{$dest}{map} eq '';
+			next unless $portals_lut{$portal}{dest}{$dest}{enabled};
 			if ($portals_lut{$portal}{dest}{$dest}{steps}) {
 				# this is a Warp NPC
 				push (@{$self->{portals}->{$portals_lut{$portal}{source}{map}}}, {
@@ -1867,7 +1868,7 @@ sub updatePos {
 		}
 		my ($i, $args, $routeTask, $solution);
 		if (
-			defined ($i = AI::findAction ('route')) && ($args = AI::args ($i)) && (
+			defined ($i = AI::findAction ('route')) && ($args = AI::args($i)) && (
 				($routeTask = $args->getSubtask) && %{$routeTask} && ($solution = $routeTask->{solution}) && @$solution
 				||
 				$args->{dest} && $args->{dest}{pos} && ($solution = [{x => $args->{dest}{pos}{x}, y => $args->{dest}{pos}{y}}])
@@ -2009,3 +2010,4 @@ sub defineType {
 }
 
 1;
+

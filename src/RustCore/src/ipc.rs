@@ -73,6 +73,9 @@ pub struct IpcServer {
 }
 
 impl IpcServer {
+    pub fn port(&self) -> std::io::Result<u16> {
+        self.listener.local_addr().map(|addr| addr.port())
+    }
     pub async fn bind(addr: &str) -> Result<Self> {
         let listener = TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;

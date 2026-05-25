@@ -32,10 +32,12 @@ use Utils;
 use Utils::TextReader;
 use Plugins;
 use Settings;
+use Globals qw(%equipSlot_rlut);
 use Log qw(warning error debug);
 use Translation qw/T TF/;
 
 our @EXPORT = qw(
+	parseMonstersTableFile
 	parseAchievementFile
 	parseAttendanceRewards
 	parseArrayFile
@@ -69,6 +71,7 @@ our @EXPORT = qw(
 	parseShopControl
 	parseSkillsSPLUT
 	parseTimeouts
+	parseTeleportItems
 	parseWaypoint
 	parseItemStackLimit
 	processUltimate
@@ -83,6 +86,215 @@ our @EXPORT = qw(
 	updateNPCLUT
 	updateNPCShopFile
 );
+
+##
+# parseMonstersTableFile(file, monsters)
+# file: Filename to parse
+# monsters: Return hash
+#
+# Parses a monster DB file in the format:
+# ID Name Level HP AttackRange SkillRange AttackDelay AttackMotion Size Race
+# Element ElementLevel ChaseRange Ai isAIMode_*...
+sub parseMonstersTableFile {
+	my $file = shift;
+	my $r_hash = shift;
+
+	undef %{$r_hash};
+
+	my $reader = new Utils::TextReader($file);
+	my @expected_columns = qw(
+		ID
+		Name
+		Level
+		Hp
+		AttackRange
+		SkillRange
+		AttackDelay
+		AttackMotion
+		Size
+		Race
+		Element
+		ElementLevel
+		ChaseRange
+		Ai
+		isAIMode_Aggressive
+		isAIMode_Looter
+		isAIMode_Assist
+		isAIMode_CanMove
+		isAIMode_CastSensorIdle
+		isAIMode_CastSensorChase
+		isAIMode_MVP
+		isAIMode_KnockbackImmune
+		isAIMode_Detector
+		isAIMode_TakesFixed_1_Damage_Melee
+		isAIMode_TakesFixed_1_Damage_Ranged
+		isAIMode_TakesFixed_1_Damage_Magic
+		isAIMode_TakesFixed_1_Damage_None
+	);
+	my %boolean_columns = map { $_ => 1 } @expected_columns[14 .. $#expected_columns];
+	my %numeric_columns = map { $_ => 1 } qw(
+		ID
+		Level
+		Hp
+		AttackRange
+		SkillRange
+		AttackDelay
+		AttackMotion
+		ElementLevel
+		ChaseRange
+	);
+	my %valid_size = map { $_ => 1 } qw(Small Medium Large);
+	my %valid_race = map { $_ => 1 } qw(Formless Undead Brute Plant Insect Fish Demon Demi-Human Angel Dragon);
+	my %valid_element = map { $_ => 1 } qw(Neutral Water Earth Fire Wind Poison Holy Shadow Ghost Undead);
+	my %valid_ai = map { $_ => 1 } qw(
+		01 02 03 04 05 06 07 08 09 10 11 12 13 17 19 20 21 24 25 26 27
+		ABR_PASSIVE ABR_OFFENSIVE
+	);
+	my $line_number = 0;
+
+	while (!$reader->eof()) {
+		my $line = $reader->readLine();
+		$line_number++;
+		$line =~ s/^\s+|\s+$//g;
+
+		next if $line eq '';
+		next if $line =~ /^#/;
+
+		my @fields = split /\t/, $line, -1;
+
+		if (@fields == scalar(@expected_columns)
+			&& join("\t", @fields) eq join("\t", @expected_columns)) {
+			next;
+		}
+
+		if (@fields != scalar(@expected_columns)) {
+			error TF(
+				"%s: Invalid monsters_table entry at line %d: expected %d tab-separated columns, got %d. Dropping line.\n",
+				$file, $line_number, scalar(@expected_columns), scalar(@fields)
+			);
+			next;
+		}
+
+		my %row;
+		@row{@expected_columns} = @fields;
+
+		my $id = $row{ID};
+		if (!defined $id || $id !~ /^\d+$/) {
+			error TF("%s: Invalid monsters_table entry at line %d: invalid ID '%s'. Dropping line.\n",
+				$file, $line_number, defined $id ? $id : '');
+			next;
+		}
+
+		my @errors;
+		for my $column (@expected_columns) {
+			if (!defined $row{$column} || $row{$column} eq '') {
+				push @errors, "$column is empty";
+				next;
+			}
+
+			if ($numeric_columns{$column} && $row{$column} !~ /^\d+$/) {
+				push @errors, "$column='$row{$column}' is not numeric";
+			} elsif ($boolean_columns{$column} && $row{$column} !~ /^(?:0|1)$/) {
+				push @errors, "$column='$row{$column}' is not 0 or 1";
+			}
+		}
+
+		push @errors, "Size='$row{Size}' is invalid" if !$valid_size{$row{Size}};
+		push @errors, "Race='$row{Race}' is invalid" if !$valid_race{$row{Race}};
+		push @errors, "Element='$row{Element}' is invalid" if !$valid_element{$row{Element}};
+		push @errors, "Ai='$row{Ai}' is invalid" if !$valid_ai{uc $row{Ai}};
+
+		if (@errors) {
+			error TF(
+				"%s: Invalid monsters_table entry at line %d for monster ID %s: %s. Dropping monster.\n",
+				$file, $line_number, $id, join(', ', @errors)
+			);
+			delete $r_hash->{$id};
+			next;
+		}
+
+		$r_hash->{$id}->{ID}                               = int($row{ID});
+		$r_hash->{$id}->{Name}                             = $row{Name};
+		$r_hash->{$id}->{Level}                            = int($row{Level});
+		$r_hash->{$id}->{HP}                               = int($row{Hp});
+		$r_hash->{$id}->{AttackRange}                      = int($row{AttackRange});
+		$r_hash->{$id}->{SkillRange}                       = int($row{SkillRange});
+		$r_hash->{$id}->{AttackDelay}                      = int($row{AttackDelay});
+		$r_hash->{$id}->{AttackMotion}                     = int($row{AttackMotion});
+		$r_hash->{$id}->{Size}                             = $row{Size};
+		$r_hash->{$id}->{Race}                             = $row{Race};
+		$r_hash->{$id}->{Element}                          = $row{Element};
+		$r_hash->{$id}->{ElementLevel}                     = int($row{ElementLevel});
+		$r_hash->{$id}->{ChaseRange}                       = int($row{ChaseRange});
+		$r_hash->{$id}->{Ai}                               = uc $row{Ai};
+		$r_hash->{$id}->{isAIMode_Aggressive}              = int($row{isAIMode_Aggressive});
+		$r_hash->{$id}->{isAIMode_Looter}                  = int($row{isAIMode_Looter});
+		$r_hash->{$id}->{isAIMode_Assist}                  = int($row{isAIMode_Assist});
+		$r_hash->{$id}->{isAIMode_CanMove}                 = int($row{isAIMode_CanMove});
+		$r_hash->{$id}->{isAIMode_CastSensorIdle}          = int($row{isAIMode_CastSensorIdle});
+		$r_hash->{$id}->{isAIMode_CastSensorChase}         = int($row{isAIMode_CastSensorChase});
+		$r_hash->{$id}->{isAIMode_MVP}                     = int($row{isAIMode_MVP});
+		$r_hash->{$id}->{isAIMode_KnockbackImmune}         = int($row{isAIMode_KnockbackImmune});
+		$r_hash->{$id}->{isAIMode_Detector}                = int($row{isAIMode_Detector});
+		$r_hash->{$id}->{isAIMode_TakesFixed_1_Damage_Melee}  = int($row{isAIMode_TakesFixed_1_Damage_Melee});
+		$r_hash->{$id}->{isAIMode_TakesFixed_1_Damage_Ranged} = int($row{isAIMode_TakesFixed_1_Damage_Ranged});
+		$r_hash->{$id}->{isAIMode_TakesFixed_1_Damage_Magic}  = int($row{isAIMode_TakesFixed_1_Damage_Magic});
+		$r_hash->{$id}->{isAIMode_TakesFixed_1_Damage_None}   = int($row{isAIMode_TakesFixed_1_Damage_None});
+	}
+
+	return 1;
+}
+
+##
+# parseItemHandTypeTable(file, hand_types)
+# file: Filename to parse
+# hand_types: Return hash
+#
+# Parses an item hand type file in the format:
+# itemID AegisName type
+sub parseItemHandTypeTable {
+	my ($file, $r_hash) = @_;
+
+	undef %{$r_hash};
+
+	my $reader = new Utils::TextReader($file);
+	my $line_number = 0;
+	while (!$reader->eof()) {
+		my $line = $reader->readLine();
+		$line_number++;
+		$line =~ s/\x{FEFF}//g;
+		$line =~ s/[\r\n]//g;
+		$line =~ s/^\s+|\s+$//g;
+		next if $line eq '';
+		next if $line =~ /^#/;
+
+		$line =~ s/\s+#.*$//;
+		my ($item_id, $aegis_name, $type) = split /\s+/, $line, 3;
+		if (!defined $item_id || !defined $aegis_name || !defined $type) {
+			error TF(
+				"%s: Invalid item_hand_type entry at line %d: expected 3 whitespace-separated columns. Dropping line.\n",
+				$file, $line_number
+			);
+			next;
+		}
+
+		if ($item_id !~ /^\d+$/) {
+			error TF(
+				"%s: Invalid item_hand_type entry at line %d: invalid item ID '%s'. Dropping line.\n",
+				$file, $line_number, $item_id
+			);
+			next;
+		}
+
+		$r_hash->{$item_id} = {
+			itemID    => int($item_id),
+			aegisName => $aegis_name,
+			type      => $type,
+		};
+	}
+
+	return 1;
+}
 
 ##
 # parseAchievementFile(file, achievments)
@@ -761,6 +973,7 @@ sub parsePortals {
 	my $r_array = shift;
 	undef %{$r_hash};
 	undef @{$r_array};
+	Log::debug("[parsePortals] Loading portals file: $file\n", "calc_map_route");
 	my $reader = new Utils::TextReader($file);
 	while (!$reader->eof()) {
 		my $line = $reader->readLine();
@@ -774,12 +987,28 @@ sub parsePortals {
 		my ($source_map, $source_x, $source_y, $dest_map, $dest_x, $dest_y, $misc) = ($1, $2, $3, $4, $5, $6, $7);
 			my $portal = "$source_map $source_x $source_y";
 			my $dest = "$dest_map $dest_x $dest_y";
+			my $dynamicPortalGroup;
+			my $dynamicPortalGroupBlock;
+			while ($misc =~ s/(?:^|\s)\[(\^?)([A-Za-z0-9_]+)\](?=\s|$)/ /) {
+				if ($1 && $1 eq '^') {
+					$dynamicPortalGroupBlock = $2;
+				} else {
+					$dynamicPortalGroup = $2;
+				}
+			}
+			$misc =~ s/\s+/ /g;
+			$misc =~ s/^\s+|\s+$//g;
 			$$r_hash{$portal}{'source'}{'map'} = $source_map;
 			$$r_hash{$portal}{'source'}{'x'} = $source_x;
 			$$r_hash{$portal}{'source'}{'y'} = $source_y;
 			$$r_hash{$portal}{'dest'}{$dest}{'map'} = $dest_map;
 			$$r_hash{$portal}{'dest'}{$dest}{'x'} = $dest_x;
 			$$r_hash{$portal}{'dest'}{$dest}{'y'} = $dest_y;
+			$$r_hash{$portal}{'dest'}{$dest}{dynamicPortalGroup} = $dynamicPortalGroup if defined $dynamicPortalGroup;
+			$$r_hash{$portal}{'dest'}{$dest}{dynamicPortalGroupBlock} = $dynamicPortalGroupBlock if defined $dynamicPortalGroupBlock;
+
+			Log::debug("[parsePortals] Portal [$source_map $source_x $source_y] > [$dest_map $dest_x $dest_y] has dynamic portal group: $dynamicPortalGroup\n", "calc_map_route", 2) if defined $dynamicPortalGroup;
+			Log::debug("[parsePortals] Portal [$source_map $source_x $source_y] > [$dest_map $dest_x $dest_y] has dynamic portal group block: $dynamicPortalGroupBlock\n", "calc_map_route", 2) if defined $dynamicPortalGroupBlock;
 			$$r_hash{$portal}{dest}{$dest}{enabled} = 1; # is available permanently (can be used when calculating a route)
 			#$$r_hash{$portal}{dest}{$dest}{active} = 1; # TODO: is available right now (otherwise, wait until it becomes available)
 			if ($misc =~ /^(\d+)\s(\d)\s(.*)$/) { # [cost] [allow_ticket] [talk sequence]
@@ -863,7 +1092,6 @@ sub parsePortalsAirship {
 	my $r_array = shift;
 	undef %{$r_hash};
 	undef @{$r_array};
-	Log::debug("[parsePortals] Loading portals file: $file\n", "calc_map_route");
 	my $reader = new Utils::TextReader($file);
 	while (!$reader->eof()) {
 		my $line = $reader->readLine();
@@ -1162,6 +1390,136 @@ sub parseSkillsSPLUT {
 		}
 	}
 	close FILE;
+	return 1;
+}
+
+sub parseTeleportItems {
+	my ($file, $r_hash) = @_;
+	undef %{$r_hash};
+	$r_hash->{list} = [];
+	Log::debug("[parseTeleportItems] Loading teleport items file: $file\n", "calc_map_route");
+
+	my $reader = new Utils::TextReader($file);
+	while (!$reader->eof()) {
+		my $line = $reader->readLine();
+		$line =~ s/\x{FEFF}//g;
+		$line =~ s/[\r\n]//g;
+		$line =~ s/^\s+|\s+$//g;
+		next if ($line eq '' || $line =~ /^#/);
+		$line =~ s/\s*#.*$//;
+		$line =~ s/,/ /g;
+		my $dynamicPortalGroup;
+		my $dynamicPortalGroupBlock;
+		while ($line =~ s/(?:^|\s)\[(\^?)([A-Za-z0-9_]+)\](?=\s|$)/ /) {
+			if ($1 && $1 eq '^') {
+				$dynamicPortalGroupBlock = $2;
+			} else {
+				$dynamicPortalGroup = $2;
+			}
+		}
+		$line =~ s/\s+/ /g;
+		$line =~ s/^\s+|\s+$//g;
+		my @args = grep { length } split /\s+/, $line;
+
+		if (@args < 6) {
+			warning TF("Invalid teleport item entry at %s: %s\n", $file, $line);
+			next;
+		}
+
+		my ($itemID, $mode, $dest_map, $dest_x, $dest_y, $min_level, @optional_args) = @args;
+		my $max_level = 0;
+		my $timeout_sec = 0;
+		my ($required_equip_slot, $required_equip_item_id);
+		my $invalid_entry = 0;
+
+		if (@optional_args) {
+			# Strict positional optional syntax:
+			# [maxLvl] [timeoutSec] [requiredEquipSlot requiredEquipItemID]
+			if (@optional_args >= 1) {
+				$max_level = shift @optional_args;
+			}
+			if (@optional_args >= 1) {
+				$timeout_sec = shift @optional_args;
+			}
+			if (@optional_args >= 2) {
+				($required_equip_slot, $required_equip_item_id) = splice(@optional_args, 0, 2);
+			}
+
+			if (@optional_args) {
+				warning TF("Invalid teleport item entry at %s: unexpected trailing optional argument(s): %s\n", $file, join(' ', @optional_args));
+				$invalid_entry = 1;
+			}
+
+			if (defined $required_equip_slot xor defined $required_equip_item_id) {
+				warning TF("Invalid teleport item entry at %s: equipment requirement must include slot and itemID: %s\n", $file, $line);
+				$invalid_entry = 1;
+			}
+		}
+
+		next if $invalid_entry;
+
+		unless ($itemID =~ /^\d+$/ && $dest_x =~ /^-?\d+$/ && $dest_y =~ /^-?\d+$/ && $min_level =~ /^\d+$/ && $max_level =~ /^\d+$/ && $timeout_sec =~ /^\d+$/) {
+			warning TF("Invalid teleport item entry at %s: expected numeric values for item/coords/levels/timeout: %s\n", $file, $line);
+			next;
+		}
+		if (defined $required_equip_slot && (!defined $required_equip_item_id || $required_equip_item_id !~ /^\d+$/)) {
+			warning TF("Invalid teleport item entry at %s: required equip item id must be numeric: %s\n", $file, $line);
+			next;
+		}
+		if (defined $required_equip_slot) {
+			my $valid_slot = 0;
+			for my $known_slot (keys %equipSlot_rlut) {
+				next unless defined $known_slot;
+				if ($known_slot =~ /^\Q$required_equip_slot\E$/i) {
+					$valid_slot = 1;
+					last;
+				}
+			}
+
+			if (!$valid_slot) {
+				warning TF("Invalid teleport item entry at %s: required equip slot is not recognized ($required_equip_slot): %s\n", $file, $line);
+				next;
+			}
+		}
+
+		$mode = lc $mode;
+		if ($mode !~ /^(?:any|random|respawn|warp)$/) {
+			warning TF("Invalid teleport item entry at %s: unrecognized mode '%s', defaulting to 'any': %s\n", $file, $mode, $line);
+			$mode = 'any';
+		}
+
+		my $entry = {
+			itemID => int($itemID),
+			mode => $mode,
+			destMap => $dest_map,
+			destX => int($dest_x),
+			destY => int($dest_y),
+			minLevel => int($min_level),
+			maxLevel => int($max_level),
+			timeoutSec => int($timeout_sec),
+		};
+		$entry->{dynamicPortalGroup} = $dynamicPortalGroup if defined $dynamicPortalGroup;
+		$entry->{dynamicPortalGroupBlock} = $dynamicPortalGroupBlock if defined $dynamicPortalGroupBlock;
+
+		if (defined $required_equip_slot && defined $required_equip_item_id) {
+			$entry->{requiredEquipSlot} = $required_equip_slot;
+			$entry->{requiredEquipItemID} = int($required_equip_item_id);
+		}
+
+		Log::debug(
+			"[parseTeleportItems] Item [$entry->{itemID}] -> [$entry->{destMap} $entry->{destX} $entry->{destY}] has dynamic portal group: $dynamicPortalGroup\n",
+			"calc_map_route",
+			2,
+		) if defined $dynamicPortalGroup;
+		Log::debug(
+			"[parseTeleportItems] Item [$entry->{itemID}] -> [$entry->{destMap} $entry->{destX} $entry->{destY}] has dynamic portal group block: $dynamicPortalGroupBlock\n",
+			"calc_map_route",
+			2,
+		) if defined $dynamicPortalGroupBlock;
+
+		push @{$r_hash->{list}}, $entry;
+	}
+
 	return 1;
 }
 

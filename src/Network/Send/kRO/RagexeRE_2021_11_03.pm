@@ -16,6 +16,7 @@ use strict;
 use base qw(Network::Send::kRO::RagexeRE_2020_07_23);
 use Log qw(debug);
 use Utils qw(getTickCount);
+use Globals;
 
 sub new {
 	my ($class) = @_;
@@ -23,6 +24,7 @@ sub new {
 
 	my %packets = (
 		'0436' => ['map_login', 'a4 a4 a4 V2 C', [qw(accountID charID sessionID unknown tick sex)]],#23
+		'0841' => ['select_accessible_mapname', 'C C', [qw(char_slot map_slot)]],
 	);
 
 	$self->{packet_list}{$_} = $packets{$_} for keys %packets;
@@ -47,7 +49,16 @@ sub sendMapLogin {
 	});
 
 	$self->sendToServer($msg);
-	debug "Sent sendMapLogin\n", "sendPacket", 2;
+}
+
+sub sendSelectAccessibleMapname {
+    my ($self, $map_slot) = @_;
+
+    $self->sendToServer($self->reconstruct({
+        switch      => 'select_accessible_mapname',
+        char_slot   => $config{char},
+        map_slot    => $map_slot,
+    }));
 }
 
 1;

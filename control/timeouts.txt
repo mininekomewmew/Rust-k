@@ -24,18 +24,20 @@ reconnect_random 20
 poseidon_wait_reply 15
 
 # Activate AI after x seconds after the map's loaded
-ai 2
+ai 1
 
-ai_move_retry 0.25
-ai_move_giveup 1
+ai_move_retry 0.4
+ai_move_giveup 1.2
 
-ai_homunculus_standby 0.5
-ai_mercenary_standby 0.5
+ai_homunculus_standby 2
+ai_mercenary_standby 2
 
 # Send the attack packet every x seconds, if it hasn't been send already
 ai_attack 1
 ai_homunculus_attack 1
 ai_mercenary_attack 1
+
+ai_attack_after_skill 0.5
 
 ai_homunculus_dance_attack_melee 0.2
 
@@ -47,9 +49,6 @@ ai_attack_auto 0.5
 ai_homunculus_attack_auto 0.5
 ai_mercenary_attack_auto 0.5
 
-ai_attack_route_adjust 0.3
-ai_homunculus_route_adjust 0.3
-ai_mercenary_route_adjust 0.3
 
 # Ignore monster for x seconds if there is no route to it
 ai_attack_failedLOS 12
@@ -57,7 +56,6 @@ ai_attack_failedLOS 12
 # Give up attacking a monster if it can't be reached within x seconds
 ai_attack_giveup 6
 
-ai_check_monster_auto 0.4
 ai_homunculus_check_monster_auto 0.2
 ai_mercenary_check_monster_auto 0.2
 
@@ -68,6 +66,13 @@ ai_attack_waitAfterKill 0.3
 ai_homunculus_attack_waitAfterKill 0.3
 ai_mercenary_attack_waitAfterKill 0.3
 
+# Every x seconds loop the attack logic routine (send move, attack, skill, avoid, etc)
+ai_attack_main 0.1
+ai_homunculus_attack_main 0.1
+ai_mercenary_attack_main 0.1
+
+ai_future_reachability_lookup 0.7
+
 ai_attack_unstuck 2.75
 ai_attack_unfail 12
 
@@ -76,13 +81,13 @@ ai_route_unstuck 2
 # Pause for the specified number of seconds after taking something,
 # it increases the interval between taking several items and between
 # taking the last item and continuing the actions.
-ai_items_take_delay 1.4
+ai_items_take_delay 1
 
 # When your monster died, start checking for loot after x seconds
-ai_items_take_start 0.4
+ai_items_take_start 0.3
 
 # Stop checking for loot x seconds after it has begun checking
-ai_items_take_end 1.2
+ai_items_take_end 0.6
 
 # When standing near an item, send the 'take' packet every x seconds until
 # the item has been taken.
@@ -162,9 +167,10 @@ ai_route_calcRoute 1
 ai_route_npcTalk 10
 
 # These timeouts are used in npc conversation (Task::TalkNPC)
-ai_npc_talk_wait_to_answer 1.5
 ai_npc_talk_wait_after_close_to_cancel 0.5
 ai_npc_talk_wait_after_cancel_to_destroy 0.5
+
+ai_npc_talk_wait_before_continue 0.7
 
 ai_buyAuto 5
 ai_buyAuto_wait 2
@@ -179,6 +185,7 @@ ai_sellAuto_wait_before_sell 2
 ai_sellAuto_wait_after_packet_giveup 15
 
 ai_storageAuto 2
+ai_storageAuto_getAutoCheck 2
 ai_storageAuto_giveup 15
 ai_storageAuto_useItem 2
 ai_storageAuto_wait_before_action 2
@@ -207,4 +214,11 @@ welcomeText 4
 patchserver 120
 
 # Time to wait before load map in xKore mode
-ai_clientSuspend 10
+ai_clientSuspend 1
+
+ai_route_position_prediction_delay 0.05
+meetingPosition_future_reachability_lookup 0.3
+
+# If a target is predicted to move into attack range/LOS soon, wait up to x seconds
+# before rerouting or dropping it. Shared by player and slave attack AI.
+ai_attack_allowed_waitForTarget 0.3

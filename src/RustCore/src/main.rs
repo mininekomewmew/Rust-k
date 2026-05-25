@@ -14,13 +14,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn IPC Server
     let ipc_server = IpcServer::bind("127.0.0.1:0").await?;
-    info!("Rust Core bridge active.");
+    let port = ipc_server.port().unwrap_or(0);
+    info!("Rust Core bridge active on port {}.", port);
     
+    // Register bot
+    let bot_id = std::env::var("BOT_ID").unwrap_or_else(|_| "default".to_string());
+    let pid = std::process::id();
+    
+    std::fs::create_dir_all("logs").unwrap_or_default();
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("logs/bots.registry") {
+        use std::io::Write;
+        let _ = writeln!(file, "{},{},{}", pid, bot_id, port);
+    }
+
     tokio::spawn(async move {
         if let Err(e) = ipc_server.run(tx_cmd).await {
             error!("IPC Server error: {}", e);
         }
     });
+
 
     let mut current_client: Option<RoClient> = None;
     let mut current_addr: String = String::new();

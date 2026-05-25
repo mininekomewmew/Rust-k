@@ -1,0 +1,1 @@
+/home/home/Downloads/perlopenkore/src/RustProxy/target/debug/libkore_packet_proxy.rlib: /home/home/Downloads/perlopenkore/src/RustProxy/src/lib.rs /home/home/Downloads/perlopenkore/src/RustProxy/src/parser.rs

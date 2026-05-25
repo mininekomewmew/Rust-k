@@ -25,3 +25,13 @@ path = "src/bin/analyzer.rs"
 [[bin]]
 name = "kore-console"
 path = "src/bin/console.rs"
+
+[[bin]]
+name = "kore-tui"
+path = "src/bin/tui.rs"
+
+[dependencies.ratatui]
+version = "0.26"
+
+[dependencies.crossterm]
+version = "0.27"

@@ -1,0 +1,10 @@
+master 1
+server 0
+username test
+password test
+char 0
+networkCore rust
+XKore 0
+debug 1
+debugPacket_received 1
+debugPacket_exclude 0000

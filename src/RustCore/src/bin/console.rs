@@ -22,12 +22,10 @@ fn main() -> anyhow::Result<()> {
         Commands::List => {
             if let Ok(file) = File::open("logs/bots.registry") {
                 let reader = BufReader::new(file);
-                println!("{:<10} | {:<15} | {:<10}", "PID", "BOT_ID", "PORT");
-                println!("------------------------------------------");
                 for line in reader.lines().flatten() {
                     let parts: Vec<&str> = line.split(',').collect();
                     if parts.len() == 3 {
-                        println!("{:<10} | {:<15} | {:<10}", parts[0], parts[1], parts[2]);
+                        println!("Bot {} (PID: {}) listening on {}", parts[1], parts[0], parts[2]);
                     }
                 }
             } else {

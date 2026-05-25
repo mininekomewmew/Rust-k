@@ -63,6 +63,7 @@ our @EXPORT = (
 	qw/auth
 	configModify
 	bulkConfigModify
+	bulkSetTimeout
 	setTimeout
 	saveConfigFile/,
 
@@ -140,6 +141,9 @@ our @EXPORT = (
 	itemLog_clear
 	look
 	lookAtPosition
+	lookAtPositionNaturally
+	getNaturalLookDirections
+	getClosestWalls
 	manualMove
 	meetingPosition
 	objectAdded
@@ -163,14 +167,26 @@ our @EXPORT = (
 	stripLanguageCode
 	switchConfigFile
 	updateDamageTables
+	update_npc_shop_cache
 	updatePlayerNameCache
 	canUseTeleport
+	isTeleportItemEquipRequirementSatisfied
+	canTeleportItemEquipRequirementBeSatisfied
+	tryEquipTeleportItemRequirement
+	registerTeleportItemPendingUse
+	clearTeleportItemPendingUse
+	markTeleportItemUsed
+	setTeleportItemCooldownFromRemainingSeconds
 	top10Listing
 	whenGroundStatus
 	writeStorageLog
 	getBestTarget
 	isSafe
 	isSafeActorQuery
+	getActorNameSafe
+	itemNameSimpleWithSlots
+	get_closest_npc_shop_for_item
+	sumByNameID_all
 	isCellOccupied/,
 
 	# Actor's Actions Text
@@ -193,6 +209,16 @@ our @EXPORT = (
 	avoidList_near
 	compilePortals
 	compilePortals_check
+	refreshDynamicPortalGroups
+	refreshDynamicPortalStates
+	applyDynamicPortalStates
+	getDynamicPortalDestinations
+	hasMapCoords
+	isRoutePointDefined
+	isRoutePointReachableOnField
+	isRouteSourceRemoved
+	suspendRouteSource
+	restoreSuspendedRouteSource
 	portalExists
 	portalExists2
 	portalExistsAirship
@@ -213,6 +239,9 @@ our @EXPORT = (
 	openBuyerShop
 	closeBuyerShop
 	inLockMap
+	getAttackAutoModeForContext
+	getAttackAutoMode
+	getEffectiveAttackOnRoute
 	parseReload
 	setCharDeleteDate
 	toBase62
@@ -220,7 +249,9 @@ our @EXPORT = (
 	solveItemLink
 	solveMessage
 	solveMSG
+	get_lockMap_cell
 	absunit
+	print_callers
 	autoNpcTalk/,
 
 	# Npc buy and sell
@@ -236,7 +267,27 @@ our @EXPORT = (
 # use SelfLoader; 1;
 # __DATA__
 
+# sumByNameID_all
+# Returns how many units of an item we own across inventory, cart and/or storage.
+sub sumByNameID_all {
+	my ($itemID, $useInventory, $useCart, $useStorage) = @_;
+	
+	my $total = 0;
 
+	if ($useInventory && $char->inventory->isReady()) {
+		$total += $char->inventory->sumByNameID($itemID, 1);
+	}
+
+	if ($useCart && $char->cart->isReady()) {
+		$total += $char->cart->sumByNameID($itemID, 1);
+	}
+
+	if ($useStorage && $char->storage->wasOpenedThisSession()) {
+		$total += $char->storage->sumByNameID($itemID, 1);
+	}
+	
+	return $total;
+}
 
 sub _checkActorHash($$$$) {
 	my ($name, $hash, $type, $hashName) = @_;
@@ -246,6 +297,158 @@ sub _checkActorHash($$$$) {
 				Dumper($hash);
 		}
 	}
+}
+
+sub _normalizeDynamicPortalSelection {
+	my ($selection) = @_;
+	return unless defined $selection;
+
+	$selection =~ s/^\s+|\s+$//g;
+	$selection =~ s/\s+/ /g;
+	return if $selection eq '';
+
+	my ($map, $x, $y) = split / /, $selection, 3;
+	($map) = Field::nameToBaseName(undef, $map);
+	$map = lc $map;
+
+	if (defined $x && defined $y && $x =~ /^\d+$/ && $y =~ /^\d+$/) {
+		return "$map $x $y";
+	}
+
+	return $map;
+}
+
+sub _dynamicPortalSelectionMatches {
+	my ($selection, $destID) = @_;
+	return 0 unless defined $selection && defined $destID;
+
+	my ($map, $x, $y) = split / /, $destID, 3;
+	my $normalizedDestID = join(' ', lc($map), $x, $y);
+	return 1 if $selection eq $normalizedDestID;
+	return 1 if $selection eq lc($map);
+	return 0;
+}
+
+sub _isDynamicPortalConfigKey {
+	my ($key) = @_;
+	return 0 unless defined $key;
+
+	foreach my $group (values %dynamicPortalGroups) {
+		return 1 if defined $group->{config_key} && $group->{config_key} eq $key;
+	}
+
+	return 0;
+}
+
+sub refreshDynamicPortalStates {
+	refreshDynamicPortalGroups();
+	applyDynamicPortalStates();
+}
+
+sub refreshDynamicPortalGroups {
+	%dynamicPortalGroups = ();
+
+	foreach my $portal (keys %portals_lut) {
+		foreach my $destID (keys %{$portals_lut{$portal}{dest}}) {
+			my $dest = $portals_lut{$portal}{dest}{$destID};
+			next unless $dest;
+			next unless $dest->{dynamicPortalGroup};
+			next if $dest->{map} eq '';
+			next if defined $dest->{steps} && $dest->{steps} ne '';
+
+			my $groupName = $dest->{dynamicPortalGroup};
+			$dynamicPortalGroups{$groupName}{config_key} = $groupName;
+			$dynamicPortalGroups{$groupName}{sources}{$portal}{destinations}{$destID} = 1;
+		}
+	}
+}
+
+sub applyDynamicPortalStates {
+	foreach my $group (values %dynamicPortalGroups) {
+		next unless $group->{config_key};
+		next unless keys %{$group->{sources}};
+
+		my $selection = _normalizeDynamicPortalSelection($config{$group->{config_key}});
+		my $matched = 0;
+		my $hasDestinations = 0;
+
+		foreach my $source (keys %{$group->{sources}}) {
+			my $sourceDestinations = $group->{sources}{$source}{destinations};
+			next unless $sourceDestinations && keys %{$sourceDestinations};
+			$hasDestinations = 1;
+
+			next unless exists $portals_lut{$source} && exists $portals_lut{$source}{dest};
+
+			foreach my $destID (keys %{$sourceDestinations}) {
+				next unless exists $portals_lut{$source}{dest}{$destID};
+				my $enabled = _dynamicPortalSelectionMatches($selection, $destID) ? 1 : 0;
+				$portals_lut{$source}{dest}{$destID}{enabled} = $enabled;
+				if ($enabled) {
+					debug "Dynamic portal enabled for group $group->{config_key}: $source -> $destID\n", "route", 1;
+				} elsif (!$enabled) {
+					debug "Dynamic portal disabled for group $group->{config_key}: $source -> $destID\n", "route", 2;
+				}
+				$matched ||= $enabled;
+			}
+		}
+
+		next unless $hasDestinations;
+
+		if (defined $selection && !$matched) {
+			warning TF(
+				"Dynamic portal setting '%s' has no match for %s; all detected destinations are disabled.\n",
+				$config{$group->{config_key}}, $group->{config_key}
+			);
+		}
+	}
+}
+
+sub getDynamicPortalDestinations {
+	my ($groupName) = @_;
+	return {} unless exists $dynamicPortalGroups{$groupName};
+
+	my %destinations;
+
+	foreach my $source (keys %{$dynamicPortalGroups{$groupName}{sources}}) {
+		my $sourceDestinations = $dynamicPortalGroups{$groupName}{sources}{$source}{destinations};
+		next unless $sourceDestinations;
+
+		$destinations{$_} = 1 foreach keys %{$sourceDestinations};
+	}
+
+	return \%destinations;
+}
+
+sub hasMapCoords {
+	my ($point) = @_;
+	return 0 unless ref($point) eq 'HASH';
+	return 0 unless defined $point->{x} && $point->{x} ne '';
+	return 0 unless defined $point->{y} && $point->{y} ne '';
+	return 1;
+}
+
+sub isRoutePointDefined {
+	my ($entry) = @_;
+	return 0 unless defined $entry && ref($entry) eq 'HASH';
+	return 0 unless defined $entry->{map} && $entry->{map} ne '';
+	return 0 unless defined $entry->{x} && $entry->{x} ne '';
+	return 0 unless defined $entry->{y} && $entry->{y} ne '';
+	return 1;
+}
+
+sub isRoutePointReachableOnField {
+	my ($fieldObj, $entry) = @_;
+	return 0 unless isRoutePointDefined($entry);
+	return 0 unless $fieldObj;
+	return 1 if $fieldObj->closestWalkableSpot($entry, 1);
+	return 1 if $fieldObj->closestWalkableSpot($entry, 10);
+	return 0;
+}
+
+sub isRouteSourceRemoved {
+	my ($entry) = @_;
+	return 0 unless defined $entry && ref($entry) eq 'HASH';
+	return $entry->{removed} ? 1 : 0;
 }
 
 # Checks whether the internal state of some variables are correct.
@@ -318,42 +521,59 @@ sub configModify {
 	Plugins::callHook('configModify', {
 		key => $key,
 		val => $val,
+		bulk => 0,
 		additionalOptions => \%args
 	});
 
-	if (!$args{silent} && $key !~ /password/i) {
-		my $oldval = $config{$key};
-		if (!defined $oldval) {
-			$oldval = "not set";
-		}
-
-		if ($config{$key} eq $val) {
-			if ($val) {
-				message TF("Config '%s' is already %s\n", $key, $val), "info";
-			}else{
-				message TF("Config '%s' is already *None*\n", $key), "info";
-			}
-			return;
-		}
-
-		if (!defined $val) {
-			message TF("Config '%s' unset (was %s)\n", $key, $oldval), "info";
-		} else {
-			message TF("Config '%s' set to %s (was %s)\n", $key, $val, $oldval), "info";
-		}
-	}
-	if ($args{autoCreate} && !exists $config{$key}) {
+	my $silent = ($args{silent} || $key =~ /password/i) ? 1 : 0;
+	
+	if (!exists $config{$key}) {
+		return unless ($args{autoCreate});
 		my $f;
 		if (open($f, ">>", Settings::getConfigFilename())) {
 			print $f "$key\n";
 			close($f);
+			unless ($silent) {
+				message TF("Config '%s' autocreated\n", $key), "info";
+				if (!defined $val) {
+					message TF("Config '%s' set to *None*\n", $key), "info";
+				} else {
+					message TF("Config '%s' set to %s\n", $key, $val), "info";
+				}
+			}
+		} else {
+			error TF("Failed to autocreate config key '%s'\n", $key), "info";
+			return;
+		}
+	} elsif (!defined $config{$key}) {
+		if (!defined $val) {
+			message TF("Config '%s' is already *None*\n", $key), "info" unless ($silent);
+			return;
+		} else {
+			message TF("Config '%s' set to %s (was *None*)\n", $key, $val), "info" unless ($silent);
+		}
+	} else {
+		if (!defined $val) {
+			message TF("Config '%s' unset (was %s)\n", $key, $config{$key}), "info" unless ($silent);
+		} elsif ($config{$key} eq $val) {
+			message TF("Config '%s' is already %s\n", $key, $val), "info" unless ($silent);
+			return;
+		} else {
+			message TF("Config '%s' set to %s (was %s)\n", $key, $val, $config{$key}), "info" unless ($silent);
 		}
 	}
+
 	$config{$key} = $val;
+	if (_isDynamicPortalConfigKey($key)) {
+		applyDynamicPortalStates();
+	}
 	Settings::update_log_filenames() if $key =~ /^(username|char|server)$/o;
 	saveConfigFile();
 	
-	Plugins::callHook('post_configModify');
+	Plugins::callHook('post_configModify', {
+		key => $key,
+		bulk => 0
+	});
 }
 
 ##
@@ -369,27 +589,53 @@ sub bulkConfigModify {
 	
 	
 	my %create_keys;
+	my %changed_keys;
 	foreach my $key (keys %{$r_hash}) {
-		Plugins::callHook('configModify', {
-			key => $key,
-			val => $r_hash->{$key},
-			silent => $silent
-		});
+		my $val = $r_hash->{$key};
 
-		$oldval = $config{$key};
+		my $local_silent = ($silent || $key =~ /password/i) ? 1 : 0;
 		
 		if (!exists $config{$key}) {
 			$create_keys{$key} = 1;
-		}
+			unless ($local_silent) {
+				message TF("Config '%s' autocreated\n", $key), "info";
+				if (!defined $val) {
+					message TF("Config '%s' set to *None*\n", $key), "info";
+				} else {
+					message TF("Config '%s' set to %s\n", $key, $val), "info";
+				}
+			}
+		} elsif (!defined $config{$key}) {
+			if (!defined $val) {
+				message TF("Config '%s' is already *None*\n", $key), "info" unless ($local_silent);
+				next;
+			} else {
+				message TF("Config '%s' set to %s (was *None*)\n", $key, $val), "info" unless ($local_silent);
+			}
 
-		$config{$key} = $r_hash->{$key};
-
-		if ($key =~ /password/i) {
-			message TF("Config '%s' set to %s (was *not-displayed*)\n", $key, $r_hash->{$key}), "info" unless ($silent);
 		} else {
-			message TF("Config '%s' set to %s (was %s)\n", $key, $r_hash->{$key}, $oldval), "info" unless ($silent);
+			if (!defined $val) {
+				message TF("Config '%s' unset (was %s)\n", $key, $config{$key}), "info" unless ($local_silent);
+			} elsif ($config{$key} eq $val) {
+				message TF("Config '%s' is already %s\n", $key, $val), "info" unless ($local_silent);
+				next;
+			} else {
+				message TF("Config '%s' set to %s (was %s)\n", $key, $val, $config{$key}), "info" unless ($local_silent);
+			}
 		}
+		
+		Plugins::callHook('configModify', {
+			key => $key,
+			val => $val,
+			silent => $silent,
+			bulk => 1
+		});
+
+		$changed_keys{$key} = 1;
+		$config{$key} = $val;
 	}
+
+	return unless (scalar keys %changed_keys > 0);
 	
 	if (scalar keys %create_keys > 0) {
 		my $f;
@@ -401,9 +647,59 @@ sub bulkConfigModify {
 		}
 	}
 
+	if (grep { _isDynamicPortalConfigKey($_) } keys %{$r_hash}) {
+		applyDynamicPortalStates();
+	}
 	saveConfigFile();
 	
-	Plugins::callHook('post_configModify');
+	Plugins::callHook('post_bulkConfigModify', {
+		keys => \%changed_keys
+	});
+}
+
+##
+# bulkSetTimeout (r_hash, [silent])
+# r_hash: key => value to change
+# silent: if set to 1, do not print a message to the console.
+#
+# like setTimeout but for more than one value at the same time.
+sub bulkSetTimeout {
+	my $r_hash = shift;
+	my $silent = shift;
+	my $oldtime;
+
+	my %create_keys;
+	foreach my $name (keys %{$r_hash}) {
+		Plugins::callHook('setTimeout', {
+			timeout => $name,
+			time => $r_hash->{$name},
+			additionalOptions => {
+				silent => $silent
+			}
+		});
+
+		$oldtime = $timeout{$name}{timeout};
+
+		if (!exists $timeout{$name}{timeout}) {
+			$create_keys{$name} = 1;
+		}
+
+		$timeout{$name}{timeout} = $r_hash->{$name};
+
+		message TF("Timeout '%s' set to %s (was %s)\n", $name, $r_hash->{$name}, $oldtime), "info" unless ($silent);
+	}
+
+	if (scalar keys %create_keys > 0) {
+		my $f;
+		if (open($f, ">>", Settings::getControlFilename("timeouts.txt"))) {
+			foreach my $name (keys %create_keys) {
+				print $f "$name\n";
+			}
+			close($f);
+		}
+	}
+
+	writeDataFileIntact2(Settings::getControlFilename("timeouts.txt"), \%timeout);
 }
 
 ##
@@ -417,6 +713,7 @@ sub saveConfigFile {
 sub setTimeout {
 	my $timeout = shift;
 	my $time = shift;
+	my $silent = shift;
 	my %args;
 
 	if (@_ == 1) {
@@ -441,17 +738,17 @@ sub setTimeout {
 
 		if ($timeout{$timeout}{timeout} eq $time) {
 			if ($time) {
-				message TF("Timeout '%s' is already %s\n", $timeout, $time), "info";
+				message TF("Timeout '%s' is already %s\n", $timeout, $time), "info" unless ($silent);
 			} else {
-				message TF("Timeout '%s' is already *None*\n", $timeout), "info";
+				message TF("Timeout '%s' is already *None*\n", $timeout), "info" unless ($silent);
 			}
 			return;
 		}
 
 		if (!defined $time) {
-			message TF("Timeout '%s' unset (was %s)\n", $timeout, $oldtime), "info";
+			message TF("Timeout '%s' unset (was %s)\n", $timeout, $oldtime), "info" unless ($silent);
 		} else {
-			message TF("Timeout '%s' set to %s (was %s)\n", $timeout, $time, $oldtime), "info";
+			message TF("Timeout '%s' set to %s (was %s)\n", $timeout, $time, $oldtime), "info" unless ($silent);
 		}
 	}
 	if ($args{autoCreate} && !exists $timeout{$timeout}{timeout}) {
@@ -652,7 +949,7 @@ sub objectIsMovingTowards {
 	my $obj2 = shift;
 	my $max_variance = (shift || 15);
 
-	if (!timeOut($obj->{time_move}, $obj->{time_move_calc})) {
+	if (!actorFinishedMovement($obj, $field)) {
 		# $obj is still moving
 		my %vec;
 		getVector(\%vec, $obj->{pos_to}, $obj->{pos});
@@ -670,7 +967,7 @@ sub objectIsMovingTowardsPlayer {
 	my $ignore_party_members = shift;
 	$ignore_party_members = 1 if (!defined $ignore_party_members);
 
-	if (!timeOut($obj->{time_move}, $obj->{time_move_calc}) && @playersID) {
+	if (!actorFinishedMovement($obj, $field) && @playersID) {
 		# Monster is still moving, and there are players on screen
 		my %vec;
 		getVector(\%vec, $obj->{pos_to}, $obj->{pos});
@@ -1440,7 +1737,7 @@ sub chatLog_clear {
 sub checkAllowedMap {
 	my $map = shift;
 
-	return unless AI::state == AI::AUTO;
+	return unless AI::state() == AI::AUTO();
 	return unless $config{allowedMaps};
 	return if existsInList($config{allowedMaps}, $map);
 	return if $config{allowedMaps_reaction} == 0;
@@ -1600,7 +1897,6 @@ sub is_aggressive_slave {
 # Checks whether a monster is "clean" (not being attacked by anyone).
 sub checkMonsterCleanness {
 	my ($ID) = @_;
-	return 1 if ($config{killSteal});
 	return 1 if (!$config{attackAuto});
 	return 1 if $playersList->getByID($ID) || $slavesList->getByID($ID);
 	my $monster = $monstersList->getByID($ID);
@@ -1724,7 +2020,6 @@ sub checkMonsterCleanness {
 
 sub slave_checkMonsterCleanness {
 	my ($slave, $ID) = @_;
-	return 1 if ($config{killSteal} || $config{$slave->{configPrefix}.'killSteal'});
 	return 1 if (!$config{$slave->{configPrefix}.'attackAuto'});
 	return 1 if $playersList->getByID($ID) || $slavesList->getByID($ID);
 	my $monster = $monstersList->getByID($ID);
@@ -2247,13 +2542,15 @@ sub getPlayerNameFromCache {
 sub getPortalDestName {
 	my $ID = shift;
 	my %hash; # We only want unique names, so we use a hash
-	foreach (keys %{$portals_lut{$ID}{'dest'}}) {
+	my @destinations = grep { $portals_lut{$ID}{dest}{$_}{enabled} } keys %{$portals_lut{$ID}{dest}};
+	@destinations = keys %{$portals_lut{$ID}{dest}} unless @destinations;
+	foreach (@destinations) {
 		my $key = $portals_lut{$ID}{'dest'}{$_}{'map'};
 		$hash{$key} = 1;
 	}
 
-	my @destinations = sort keys %hash;
-	return join('/', @destinations);
+	my @destinationNames = sort keys %hash;
+	return join('/', @destinationNames);
 }
 
 sub getResponse {
@@ -2399,12 +2696,26 @@ sub monsterName {
 	return $monsters_lut{$ID} || "Unknown #$ID";
 }
 
-# Resolve the name of a simple item
+# Resolve the name of a simple item with ID
 sub itemNameSimple {
 	my $ID = shift;
 	return T("Unknown") unless defined($ID);
 	return T("None") unless $ID;
 	return $items_lut{$ID} || T("Unknown #")."$ID";
+}
+
+# Resolve the name of a simple item with ID, also adds slots
+sub itemNameSimpleWithSlots {
+	my $ID = shift;
+	return T("Unknown") unless defined($ID);
+	return T("None") unless $ID;
+	return (T("Unknown #")."$ID") unless (exists $items_lut{$ID} && defined $items_lut{$ID});
+	
+	my $name = $items_lut{$ID};
+	my $numSlots = $itemSlotCount_lut{$ID};
+	$name .= " [$numSlots]" if $numSlots;
+
+	return $name;
 }
 
 ##
@@ -2691,6 +3002,98 @@ sub lookAtPosition {
 }
 
 ##
+# getNaturalLookDirections(from_pos, to_pos, [current_body])
+# from_pos: source position hashref (character)
+# to_pos: target position hashref
+# current_body: optional current body direction, defaults to $char->{look}{body}
+#
+# Calculates look change using partial-turn strategy.
+# Returns: (body, head) where body is 0-7 and head is 0-2.
+sub getNaturalLookDirections {
+	my ($from_pos, $to_pos, $current_body) = @_;
+	return unless ($from_pos && $to_pos);
+
+	$current_body = $char->{look}{body} unless defined $current_body;
+
+	my %vec;
+	getVector(\%vec, $to_pos, $from_pos);
+	my $target_body = int(sprintf("%.0f", (360 - vectorToDegree(\%vec)) / 45)) % 8;
+
+	my $body = $current_body;
+	my $head = 0;
+	my $offset = ($target_body - $body + 8) % 8;
+	$offset -= 8 if ($offset > 4);
+
+	if ($offset != 0) {
+		if (abs($offset) <= 1) {
+			$head = $offset > 0 ? 2 : 1;
+		} else {
+			my $step = $offset > 0 ? 1 : -1;
+			$body = ($target_body - $step + 8) % 8;
+			$head = $step > 0 ? 2 : 1;
+		}
+	}
+
+	return ($body, $head);
+}
+
+##
+# lookAtPositionNaturally(from_pos, to_pos, [current_body])
+# from_pos: source position hashref (character)
+# to_pos: target position hashref
+# current_body: optional current body direction, defaults to $char->{look}{body}
+#
+# Calculates and executes look change using partial-turn strategy.
+# Returns: (body, head) where body is 0-7 and head is 0-2.
+sub lookAtPositionNaturally {
+	my ($from_pos, $to_pos, $current_body) = @_;
+	my ($body, $head) = getNaturalLookDirections($from_pos, $to_pos, $current_body);
+	return unless defined $body;
+
+	look($body, $head) if ($body != $char->{look}{body} || $head != $char->{look}{head});
+	return ($body, $head);
+}
+
+##
+# getClosestWalls(from_pos, wall_range, [field_obj])
+# from_pos: source position hashref
+# wall_range: search range around from_pos
+# field_obj: optional field object, defaults to current global field
+#
+# Returns: arrayref with all nearest non-walkable cells found in range.
+sub getClosestWalls {
+	my ($from_pos, $wall_range, $field_obj) = @_;
+	return [] unless ($from_pos && defined $wall_range && $wall_range > 0);
+
+	$field_obj ||= $field;
+	return [] unless $field_obj;
+
+	my $closest_distance;
+	my @closest_walls;
+	for (my $dx = -$wall_range; $dx <= $wall_range; $dx++) {
+		for (my $dy = -$wall_range; $dy <= $wall_range; $dy++) {
+			next if $dx == 0 && $dy == 0;
+
+			my $candidate = {
+				x => $from_pos->{x} + $dx,
+				y => $from_pos->{y} + $dy,
+			};
+			next if $field_obj->isWalkable($candidate->{x}, $candidate->{y});
+
+			my $distance = distance($candidate, $from_pos);
+			if (!defined $closest_distance || $distance < $closest_distance) {
+				$closest_distance = $distance;
+				@closest_walls = ($candidate);
+			} elsif ($distance == $closest_distance) {
+				push @closest_walls, $candidate;
+			}
+		}
+	}
+
+	return \@closest_walls;
+}
+
+##
 # manualMove(dx, dy)
 #
 # Moves the character offset from its current position.
@@ -2708,6 +3111,51 @@ sub manualMove {
 	main::ai_route($field->baseName, $char->{pos_to}{x} + $dx, $char->{pos_to}{y} + $dy);
 }
 
+sub getMeetingPositionCandidateSpots {
+	my ($realMyPos, $target_solution, $target_start_step, $max_path_dist, $attackMaxDistance, $min_destination_dist) = @_;
+
+	$target_start_step = 0 if (!defined $target_start_step || $target_start_step < 0);
+
+	my %seen;
+	foreach my $target_step ($target_start_step .. $#{$target_solution}) {
+		my $targetPos = $target_solution->[$target_step];
+		next if !$targetPos;
+
+		for (my $x = $targetPos->{x} - $attackMaxDistance; $x <= $targetPos->{x} + $attackMaxDistance; $x++) {
+			for (my $y = $targetPos->{y} - $attackMaxDistance; $y <= $targetPos->{y} + $attackMaxDistance; $y++) {
+				my %spot = (
+					x => $x,
+					y => $y,
+				);
+				my $key = "$x $y";
+				next if exists $seen{$key};
+
+
+				my $dist_to_target = blockDistance(\%spot, $targetPos);
+				next if $dist_to_target > $attackMaxDistance;
+				next if $dist_to_target < $min_destination_dist;
+
+				my $dist_to_spot = blockDistance($realMyPos, \%spot);
+				next if $dist_to_spot > $max_path_dist;
+
+				$seen{$key} = {
+					x => $x,
+					y => $y,
+					dist_to_spot => $dist_to_spot,
+					target_step => $target_step,
+				};
+			}
+		}
+	}
+
+	return sort {
+		$a->{dist_to_spot} <=> $b->{dist_to_spot}
+		|| $a->{target_step} <=> $b->{target_step}
+		|| $a->{x} <=> $b->{x}
+		|| $a->{y} <=> $b->{y}
+	} values %seen;
+}
+
 ##
 # meetingPosition(actor, actorType, target_actor, attackMaxDistance, runFromTargetActive)
 # actor: current object.
@@ -2720,19 +3168,24 @@ sub manualMove {
 sub meetingPosition {
 	my ($actor, $actorType, $target, $attackMaxDistance, $runFromTargetActive) = @_;
 
+	my $start_time = time;
+
 	if ($attackMaxDistance < 1) {
 		error "attackMaxDistance must be positive ($attackMaxDistance).\n";
 		return;
 	}
 
-	my $extra_time_actor = $timeout{'meetingPosition_extra_time_actor'}{'timeout'} ? $timeout{'meetingPosition_extra_time_actor'}{'timeout'} : 0.2;
-	my $extra_time_target = $timeout{'meetingPosition_extra_time_target'}{'timeout'} ? $timeout{'meetingPosition_extra_time_target'}{'timeout'} : 0.2;
+	my $extra_time = exists $timeout{'ai_route_position_prediction_delay'}{'timeout'} ? $timeout{'ai_route_position_prediction_delay'}{'timeout'} : 0.1;
+	$extra_time = 0 unless (defined $extra_time);
+
+	my $future_reachability_lookup_time = exists $timeout{'meetingPosition_future_reachability_lookup'}{'timeout'} ? $timeout{'meetingPosition_future_reachability_lookup'}{'timeout'} : 0.3;
+	$future_reachability_lookup_time = 0 unless (defined $future_reachability_lookup_time);
+
+	my $max_leeway_time = exists $timeout{'ai_attack_allowed_waitForTarget'}{'timeout'} ? $timeout{'ai_attack_allowed_waitForTarget'}{'timeout'} : 0.3;
+	$max_leeway_time -= $extra_time;
+	$max_leeway_time = 0 if (!defined $max_leeway_time || $max_leeway_time < 0);
 
 	my $mySpeed = ($actor->{walk_speed} || 0.12);
-	my $timeSinceActorMoved = time - $actor->{time_move} + $extra_time_actor;
-
-	my $my_solution;
-	my $timeActorFinishMove;
 
 	my $attackRouteMaxPathDistance;
 	my $attackCanSnipe;
@@ -2769,10 +3222,6 @@ sub meetingPosition {
 			}
 		}
 
-		# If the actor is the character then we should have already saved the time calc and solution at Receive.pm::character_moves
-		$my_solution = $char->{solution};
-		$timeActorFinishMove = $char->{time_move_calc};
-
 	# actor is a slave
 	} elsif ($actorType == 2) {
 		$attackRouteMaxPathDistance = $config{$actor->{configPrefix}.'attackRouteMaxPathDistance'} || 20;
@@ -2788,29 +3237,23 @@ sub meetingPosition {
 		$attackCanSnipe = $config{$actor->{configPrefix}.'attackCanSnipe'};
 		$master = $char;
 		$masterPos = 1;
-
-		$my_solution = get_solution($field, $actor->{pos}, $actor->{pos_to});
-		$timeActorFinishMove = calcTimeFromSolution($my_solution, $mySpeed);
 	}
 
-	my $realMyPos;
-	# Actor has finished moving and is at PosTo
-	if ($timeSinceActorMoved >= $timeActorFinishMove) {
-		$realMyPos = $actor->{pos_to};
+	my $realMyPos = calcPosFromPathfinding($field, $actor, $extra_time, 1);
 
-	# Actor is currently moving
-	} else {
-		my $steps_walked = calcStepsWalkedFromTimeAndSolution($my_solution, $mySpeed, $timeSinceActorMoved);
-		$realMyPos = $my_solution->[$steps_walked];
+	# Fall back to the server-reported destination if pathfinding could not infer a position.
+	$realMyPos = $actor->{pos_to} if (!$realMyPos && $actor->{pos_to});
+
+	# Should never happen, but keep a nearby walkable fallback when possible.
+	if ($realMyPos && !$field->isWalkable($realMyPos->{x}, $realMyPos->{y})) {
+		my $closest_walkable = $field->closestWalkableSpot($realMyPos, 1);
+		$realMyPos = $closest_walkable if $closest_walkable;
 	}
 
-	# Should never happen
-	unless ($field->isWalkable($realMyPos->{x}, $realMyPos->{y})) {
-		$realMyPos = $field->closestWalkableSpot($realMyPos, 1);
-	}
+	return unless $realMyPos && defined $realMyPos->{x} && defined $realMyPos->{y};
 
 	my $targetSpeed = ($target->{walk_speed} || 0.12);
-	my $timeSinceTargetMoved = time - $target->{time_move} + $extra_time_target;
+	my $timeSinceTargetMoved = time - $target->{time_move} + $extra_time;
 
 	my $target_solution = get_solution($field, $target->{pos}, $target->{pos_to});
 
@@ -2821,29 +3264,16 @@ sub meetingPosition {
 	my $targetTotalSteps;
 	my $targetCurrentStep;
 
-	my @target_pos_to_check;
-
 	# Target has finished moving
 	if ($timeSinceTargetMoved >= $timeTargetFinishMove) {
 		$realTargetPos = $target->{pos_to};
-		$target_pos_to_check[0] = {
-			targetPosInStep => $realTargetPos
-		};
+		$targetCurrentStep = 0;
 
 	# Target is currently moving
 	} else {
 		$targetTotalSteps = $#{$target_solution};
 		$targetCurrentStep = calcStepsWalkedFromTimeAndSolution($target_solution, $targetSpeed, $timeSinceTargetMoved);
 		$realTargetPos = $target_solution->[$targetCurrentStep];
-
-		my $steps_count = 0;
-		foreach my $currentStep ($targetCurrentStep..$targetTotalSteps) {
-			$target_pos_to_check[$steps_count] = {
-				targetPosInStep => $target_solution->[$currentStep]
-			};
-		} continue {
-			$steps_count++;
-		}
 	}
 
 	my $master_moving;
@@ -2853,7 +3283,7 @@ sub meetingPosition {
 	my $masterSpeed;
 	if ($masterPos) {
 		$masterSpeed = ($master->{walk_speed} || 0.12);
-		$timeSinceMasterMoved = time - $master->{time_move} + $extra_time_actor;
+		$timeSinceMasterMoved = time - $master->{time_move} + $extra_time;
 
 		$master_solution = get_solution($field, $master->{pos}, $master->{pos_to});
 
@@ -2884,115 +3314,219 @@ sub meetingPosition {
 	}
 	# Add 1 here to account for pos from solution so we don't have to do it multiple times later
 	$max_path_dist += 1;
-	
-	my %allspots;
-	my @blocks;
-	if ($runFromTargetActive) {
-		@blocks = calcRectArea2($realMyPos->{x}, $realMyPos->{y}, $max_path_dist, 0);
-	} else {
-		@blocks = calcRectArea2($realTargetPos->{x}, $realTargetPos->{y}, $attackMaxDistance + 2, 0);
-	}
-	foreach my $spot (@blocks) {
-		$allspots{$spot->{x}}{$spot->{y}} = 1;
-	}
+
+	my @candidate_spots = getMeetingPositionCandidateSpots(
+		$realMyPos,
+		$target_solution,
+		$targetCurrentStep,
+		$max_path_dist,
+		$attackMaxDistance,
+		$min_destination_dist,
+	);
+	my $allspots_count = scalar @candidate_spots;
 
 	my %prohibitedSpots;
-	foreach my $prohibited_actor (@$playersList, @$monstersList, @$npcsList, @$petsList, @$slavesList, @$elementalsList) {
+	foreach my $prohibited_actor (@$playersList, @$monstersList, @$npcsList, @$petsList, @$slavesList, @$elementalsList, @$portalsList) {
+		next unless ($prohibited_actor->{pos_to});
+		next unless (defined $prohibited_actor->{ID});
+		next if ($prohibited_actor->{ID} eq $target->{ID});
+		next if ($prohibited_actor->{ID} eq $actor->{ID});
+		next if ($masterPos && $master && defined $master->{ID} && $prohibited_actor->{ID} eq $master->{ID});
 		$prohibitedSpots{$prohibited_actor->{pos_to}{x}}{$prohibited_actor->{pos_to}{y}} = 1;
 	}
+
+	my %prohibitedCells;
+	my %plugin_args = ( cells => \%prohibitedCells, field => $field, caller => 'meetingPosition' );
+	Plugins::callHook('add_prohibitedCells' => \%plugin_args);
 
 	my $best_spot;
 	my $best_targetPosInStep;
 	my $best_dist_to_target;
+	my $best_dist_to_spot;
+	my $best_path_dist;
 	my $best_time;
+	my $best_solution;
+	my %meeting_rejections;
 
-	foreach my $x_spot (sort keys %allspots) {
-		foreach my $y_spot (sort keys %{$allspots{$x_spot}}) {
-			my $spot;
-			$spot->{x} = $x_spot;
-			$spot->{y} = $y_spot;
+	require Task::Route;
+	my $solution;
 
-			next unless ($spot->{x} != $realMyPos->{x} || $spot->{y} != $realMyPos->{y});
+	debug "[meetingPosition] before allspots. candidates=$allspots_count max_path_dist=$max_path_dist myPos=$realMyPos->{x} $realMyPos->{y} targetPos=$realTargetPos->{x} $realTargetPos->{y}\n", "ai_attack", 2;
+	foreach my $candidate (@candidate_spots) {
+		my $spot = {
+			x => $candidate->{x},
+			y => $candidate->{y},
+		};
 
-			# Is this spot acceptable?
+		if ($spot->{x} == $realMyPos->{x} && $spot->{y} == $realMyPos->{y}) {
+			$meeting_rejections{same_as_self}++;
+			next;
+		}
 
-			# 1. It must be walkable.
-			next unless ($field->isWalkable($spot->{x}, $spot->{y}));
-			
-			# 1.2 It must not be occupied
-			next if (exists $prohibitedSpots{$spot->{x}} && exists $prohibitedSpots{$spot->{x}}{$spot->{y}});
+		# Is this spot acceptable?
 
-			# 2. It must not be close to a portal.
-			next if (positionNearPortal($spot, $config{'attackMinPortalDistance'}));
+		# 1. It must be walkable.
+		unless ($field->isWalkable($spot->{x}, $spot->{y})) {
+			$meeting_rejections{not_walkable}++;
+			next;
+		}
+		
+		# 1.2 It must not be occupied
+		if (exists $prohibitedSpots{$spot->{x}} && exists $prohibitedSpots{$spot->{x}}{$spot->{y}}) {
+			$meeting_rejections{occupied}++;
+			next;
+		}
 
-			my $time_actor_to_get_to_spot;
+		# 1.3 It must not be inside plugin-provided prohibited cells.
+		if (exists $prohibitedCells{$spot->{x}} && exists $prohibitedCells{$spot->{x}}{$spot->{y}}) {
+			$meeting_rejections{prohibited_cell}++;
+			next;
+		}
 
-			my $solution = get_solution($field, $realMyPos, $spot);
-			
-			# 3. It must be reachable.
-			next if (scalar @{$solution} == 0);
-			
-			# 4. It must have at max $max_path_dist of route distance to it from our current position (only if running away)
-			next if ($runFromTargetActive && scalar @{$solution} > $max_path_dist);
+		my $dist_to_spot = $candidate->{dist_to_spot};
 
-			$time_actor_to_get_to_spot = calcTimeFromSolution($solution, $mySpeed);
+		if (defined $best_path_dist && $dist_to_spot >= $best_path_dist) {
+			$meeting_rejections{worse_than_best}++;
+			next;
+		}
+		
+		# 2. It must not be close to a portal.
+		if (positionNearPortal($spot, $config{'attackMinPortalDistance'})) {
+			$meeting_rejections{near_portal}++;
+			next;
+		}
 
+		@{$solution} = ();
+		unless (Task::Route->getRoute($solution, $field, $realMyPos, $spot, $config{'route_avoidWalls'}, 0, 0, 1, 1)) {
+			$meeting_rejections{route_failed}++;
+			next;
+		}
 
-			my $total_time = ($timeSinceTargetMoved+$time_actor_to_get_to_spot);
-			my $temp_targetCurrentStep = calcStepsWalkedFromTimeAndSolution($target_solution, $targetSpeed, $total_time);
-			# Position target would be at if it doesn't change route (and is not following us)
-			my $targetPosInStep = $target_solution->[$temp_targetCurrentStep];
+		# 3. It must be reachable.
+		if (scalar @{$solution} == 0) {
+			$meeting_rejections{empty_solution}++;
+			next;
+		}
+		
+		my $path_dist = scalar @{$solution};
+		
+		# 4. It must have at max $max_path_dist of route distance to it from our current position.
+		if ($path_dist > $max_path_dist) {
+			$meeting_rejections{path_too_long}++;
+			next;
+		}
 
-			# 5. It must not be the same position the target will be in
-			next unless ($spot->{x} != $targetPosInStep->{x} || $spot->{y} != $targetPosInStep->{y});
-			
-			# 6. We must be able to attack the target from this spot
-			next unless (canAttack($field, $spot, $targetPosInStep, $attackCanSnipe, $attackMaxDistance, $config{clientSight}) == 1);
-			
-			# 7. It must not be too close to the target if we have runfromtarget set
-			# TODO: Maybe we should assume the target will keep following us after it reaches its destination and take that into consideration when runfromtarget is set
-			my $dist_to_target = blockDistance($spot, $targetPosInStep);
-			next unless ($dist_to_target >= $min_destination_dist);
+		my $time_actor_to_get_to_spot = calcTimeFromSolution($solution, $mySpeed);
 
-			# 8. It must be within $followDistanceMax of MasterPos, if we have a master.
-			if ($realMasterPos) {
-				my $masterPosNow;
-				if ($master_moving) {
-					my $totalTime = $timeSinceMasterMoved + $time_actor_to_get_to_spot;
-					my $master_CurrentStep = calcStepsWalkedFromTimeAndSolution($master_solution, $masterSpeed, $totalTime);
-					$masterPosNow = $master_solution->[$master_CurrentStep];
-				} else {
-					$masterPosNow = $realMasterPos;
-				}
-				next unless ($spot->{x} != $masterPosNow->{x} || $spot->{y} != $masterPosNow->{y});
-				next unless (blockDistance($spot, $masterPosNow) <= $followDistanceMax);
-				next unless (blockDistance($targetPosInStep, $masterPosNow) <= $followDistanceMax);
-			}
+		my $total_time = ($timeSinceTargetMoved+$time_actor_to_get_to_spot);
 
-			# 8. We must be able to get to the spot before our target
-			# TODO: Fix me. The target does not need to get to the spot, but to at least 2 cells away to be able to attack us, so take that into account
-			if ($runFromTargetActive) {
-				my $time_target_to_get_to_spot = calcTimeFromPathfinding($field, $realTargetPos, $spot, $targetSpeed);
-				if ($time_actor_to_get_to_spot > $time_target_to_get_to_spot) {
-					next;
-				}
-			}
+		my $temp_targetCurrentStep = calcStepsWalkedFromTimeAndSolution($target_solution, $targetSpeed, $total_time);
+		# Position target would be at if it doesn't change route (and is not following us)
+		my $targetPosInStep = $target_solution->[$temp_targetCurrentStep];
 
-			# We then choose the spot which takes the least amount of time to reach
-			# TODO: Maybe this is not the best idea when runfromtarget is set
-			if (!defined($best_time) || $time_actor_to_get_to_spot < $best_time) {
-				$best_time = $time_actor_to_get_to_spot;
-				$best_spot = $spot;
-				$best_targetPosInStep = $targetPosInStep;
-				$best_dist_to_target = $dist_to_target;
+		# 5. It must not be the same position the target will be in
+		if ($spot->{x} == $targetPosInStep->{x} && $spot->{y} == $targetPosInStep->{y}) {
+			$meeting_rejections{same_as_target}++;
+			next;
+		}
+
+		if (exists $prohibitedCells{$targetPosInStep->{x}} && exists $prohibitedCells{$targetPosInStep->{x}}{$targetPosInStep->{y}}) {
+			$meeting_rejections{prohibited_cell}++;
+			next;
+		}
+
+		my $leeway = 0;
+		# 6. We must be able to attack the target from this spot
+		if (canAttack($field, $spot, $targetPosInStep, $attackCanSnipe, $attackMaxDistance, $config{clientSight}) != 1) {
+			my $leeway_targetCurrentStep = calcStepsWalkedFromTimeAndSolution($target_solution, $targetSpeed, ($total_time + $max_leeway_time));
+			my $leeway_targetPosInStep = $target_solution->[$leeway_targetCurrentStep];
+			if (canAttack($field, $spot, $leeway_targetPosInStep, $attackCanSnipe, $attackMaxDistance, $config{clientSight}) != 1) {
+				$meeting_rejections{cannot_attack}++;
+				next;
+			} else {
+				$leeway = $max_leeway_time;
 			}
 		}
+
+		if ($future_reachability_lookup_time) {
+			my $future_targetCurrentStep = calcStepsWalkedFromTimeAndSolution($target_solution, $targetSpeed, ($total_time + $leeway + $future_reachability_lookup_time));
+			my $future_targetPosInStep = $target_solution->[$future_targetCurrentStep];
+
+			# 6.1. We must be able to attack the target from this spot in the near future (exclude very thin attack window)
+			if (canAttack($field, $spot, $future_targetPosInStep, $attackCanSnipe, $attackMaxDistance, $config{clientSight}) != 1) {
+				$meeting_rejections{cannot_attack_future}++;
+				next;
+			}
+		}
+		
+		# 7. It must not be too close to the target if we have runfromtarget set
+		# TODO: Maybe we should assume the target will keep following us after it reaches its destination and take that into consideration when runfromtarget is set
+		my $dist_to_target = blockDistance($spot, $targetPosInStep);
+		if ($dist_to_target < $min_destination_dist) {
+			$meeting_rejections{too_close_to_target}++;
+			next;
+		}
+
+		# 8. It must be within $followDistanceMax of MasterPos, if we have a master.
+		if ($realMasterPos) {
+			my $masterPosNow;
+			if ($master_moving) {
+				my $totalTime = $timeSinceMasterMoved + $time_actor_to_get_to_spot;
+				my $master_CurrentStep = calcStepsWalkedFromTimeAndSolution($master_solution, $masterSpeed, $totalTime);
+				$masterPosNow = $master_solution->[$master_CurrentStep];
+			} else {
+				$masterPosNow = $realMasterPos;
+			}
+			if ($spot->{x} == $masterPosNow->{x} && $spot->{y} == $masterPosNow->{y}) {
+				$meeting_rejections{same_as_master}++;
+				next;
+			}
+			if (blockDistance($spot, $masterPosNow) > $followDistanceMax) {
+				$meeting_rejections{too_far_from_master}++;
+				next;
+			}
+			if (blockDistance($targetPosInStep, $masterPosNow) > $followDistanceMax) {
+				$meeting_rejections{target_too_far_from_master}++;
+				next;
+			}
+		}
+
+		# 8. We must be able to get to the spot before our target
+		# TODO: Fix me. The target does not need to get to the spot, but to at least 2 cells away to be able to attack us, so take that into account
+		if ($runFromTargetActive) {
+			my $time_target_to_get_to_spot = calcTimeFromPathfinding($field, $realTargetPos, $spot, $targetSpeed);
+			if ($time_actor_to_get_to_spot > $time_target_to_get_to_spot) {
+				$meeting_rejections{target_gets_there_first}++;
+				next;
+			}
+		}
+
+		# We then choose the spot which takes the least amount of time to reach
+		# TODO: Maybe this is not the best idea when runfromtarget is set
+		if (!defined($best_time) || $time_actor_to_get_to_spot < $best_time) {
+			$best_time = $time_actor_to_get_to_spot;
+			$best_spot = $spot;
+			$best_dist_to_spot = $dist_to_spot;
+			$best_path_dist = $path_dist;
+			$best_targetPosInStep = $targetPosInStep;
+			$best_dist_to_target = $dist_to_target;
+			$best_solution = $solution;
+		}
 	}
+	my $end_time = time;
+
+	my $elapsed = $end_time - $start_time;
+	debug "[meetingPosition] Elapsed time $elapsed\n", "ai_attack", 2;
+
+	debug "[meetingPosition] Rejections: " . join(', ', map { $_ . '=' . $meeting_rejections{$_} } sort keys %meeting_rejections) . "\n", "ai_attack", 2;
 
 	if (defined $best_spot) {
-		debug "[meetingPosition] Best spot is $best_spot->{x} $best_spot->{y}, mob will be at $best_targetPosInStep->{x} $best_targetPosInStep->{y}, dist $best_dist_to_target, it will take $best_time seconds to get there.\n";
+		debug "[meetingPosition] Best spot is $best_spot->{x} $best_spot->{y}, mob will be at $best_targetPosInStep->{x} $best_targetPosInStep->{y}, dist $best_dist_to_target, it will take $best_time seconds to get there.\n", "ai_attack", 1;
+		debug "[meetingPosition] Solution: ". join(' >> ', map { "$_->{x} $_->{y}" } @{$best_solution}) ."\n", "ai_attack", 3;
 		return $best_spot;
 	}
+
+	debug "[meetingPosition] No valid spot found.\n", "ai_attack", 1;
 }
 
 sub objectAdded {
@@ -3061,6 +3595,27 @@ sub mon_control {
 	my ($name, $nameID) = @_;
 
 	return $mon_control{lc($name)} || $mon_control{$nameID} || $mon_control{all} || { attack_auto => 1 };
+}
+
+##
+# monsterPriority($name, $nameID)
+#
+# Returns the priority.txt priority for a monster.
+# Checks monster ID first, then monster name, then the 'all' fallback.
+# If nothing matches, return 0.
+sub monsterPriority {
+	my ($name, $nameID) = @_;
+
+	if (defined $nameID && exists $priority{$nameID}) {
+		return $priority{$nameID};
+	}
+
+	if (defined $name && exists $priority{lc $name}) {
+		return $priority{lc $name};
+	}
+
+	return $priority{all} if exists $priority{all};
+	return 0;
 }
 
 ##
@@ -3347,16 +3902,24 @@ sub setPartySkillTimer {
 }
 
 ##
-# boolean isCellOccupied(pos)
+# boolean isCellOccupied(pos, ignore_actor)
 # pos: position hash.
+# ignore_actor: actor to ignore (usually self).
 #
 # Returns 1 if there is a player, npc or mob in the cell, otherwise return 0.
 # TODO: Check if a character can move to a cell with a pet, elemental, homunculus or mercenary
 sub isCellOccupied {
-	my ($pos) = @_;
+	my ($pos, $ignore_actor) = @_;
+
+	if ($ignore_actor && $char && $ignore_actor->{ID} ne $char->{ID}) {
+		return 1 if ($char->{pos_to}{x} == $pos->{x} && $char->{pos_to}{y} == $pos->{y});
+	}
+
 	foreach my $actor (@$playersList, @$monstersList, @$npcsList, @$petsList, @$slavesList, @$elementalsList) {
+		next if ($ignore_actor && $ignore_actor->{ID} eq $actor->{ID});
 		return 1 if ($actor->{pos_to}{x} == $pos->{x} && $actor->{pos_to}{y} == $pos->{y});
 	}
+
 	return 0;
 }
 
@@ -3405,57 +3968,6 @@ sub setStatus {
 			}
 		}
 	}
-=pod
-	foreach (keys %stateHandle) {
-		if ($opt1 == $_) {
-			if (!$actor->{statuses}{$stateHandle{$_}}) {
-				$actor->{statuses}{$stateHandle{$_}} = 1;
-				message TF("%s %s in %s state.\n", $actor, $actor->verb('are', 'is'), $statusName{$stateHandle{$_}} || $stateHandle{$_}), "parseMsg_statuslook", $verbosity;
-				$changed = 1;
-			}
-		} elsif ($actor->{statuses}{$stateHandle{$_}}) {
-			delete $actor->{statuses}{$stateHandle{$_}};
-			message TF("%s %s out of %s state.\n", $actor, $actor->verb('are', 'is'), $statusName{$stateHandle{$_}} || $stateHandle{$_}), "parseMsg_statuslook", $verbosity;
-			$changed = 1;
-		}
-	}
-
-	foreach (keys %ailmentHandle) {
-		if (($opt2 & $_) == $_) {
-			if (!$actor->{statuses}{$ailmentHandle{$_}}) {
-				$actor->{statuses}{$ailmentHandle{$_}} = 1;
-				if ($actor->isa('Actor::You')) {
-					message TF("%s have ailment: %s.\n", $actor->nameString(), $statusName{$ailmentHandle{$_}} || $ailmentHandle{$_}), "parseMsg_statuslook", $verbosity;
-				} else {
-					message TF("%s has ailment: %s.\n", $actor->nameString(), $statusName{$ailmentHandle{$_}} || $ailmentHandle{$_}), "parseMsg_statuslook", $verbosity;
-				}
-				$changed = 1;
-			}
-		} elsif ($actor->{statuses}{$ailmentHandle{$_}}) {
-			delete $actor->{statuses}{$ailmentHandle{$_}};
-			message TF("%s %s out of %s ailment.\n", $actor, $actor->verb('are', 'is'), $statusName{$ailmentHandle{$_}} || $ailmentHandle{$_}), "parseMsg_statuslook", $verbosity;
-			$changed = 1;
-		}
-	}
-
-	foreach (keys %lookHandle) {
-		if (($option & $_) == $_) {
-			if (!$actor->{statuses}{$lookHandle{$_}}) {
-				$actor->{statuses}{$lookHandle{$_}} = 1;
-				if ($actor->isa('Actor::You')) {
-					message TF("%s have look: %s.\n", $actor->nameString, $statusName{$lookHandle{$_}} || $lookHandle{$_}), "parseMsg_statuslook", $verbosity;
-				} else {
-					message TF("%s has look: %s.\n", $actor->nameString, $statusName{$lookHandle{$_}} || $lookHandle{$_}), "parseMsg_statuslook", $verbosity;
-				}
-				$changed = 1;
-			}
-		} elsif ($actor->{statuses}{$lookHandle{$_}}) {
-			delete $actor->{statuses}{$lookHandle{$_}};
-			message TF("%s %s out of %s look.\n", $actor, $actor->verb('are', 'is'), $statusName{$lookHandle{$_}} || $lookHandle{$_}), "parseMsg_statuslook", $verbosity;
-			$changed = 1;
-		}
-	}
-=cut
 	Plugins::callHook('changed_status',{
 		actor => $actor,
 		changed => $changed
@@ -3624,7 +4136,7 @@ sub updateDamageTables {
 				ai_useTeleport(1);
 			}
 
-			if (AI::action eq "attack" && mon_control($monster->{name},$monster->{nameID})->{attack_auto} == 3 && $damage) {
+			if (AI::action() eq "attack" && mon_control($monster->{name},$monster->{nameID})->{attack_auto} == 3 && $damage) {
 				# Mob-training, you only need to attack the monster once to provoke it
 				message TF("%s (%s) has been provoked, searching another monster\n", $monster->{name}, $monster->{binID});
 				$char->sendAttackStop;
@@ -3660,7 +4172,7 @@ sub updateDamageTables {
 			$monster->{target} = $targetID;
 			OpenKoreMod::updateDamageTables($monster) if (defined &OpenKoreMod::updateDamageTables);
 
-			if (AI::state == AI::AUTO && ($accountID eq $targetID or $char->{slaves} && $char->{slaves}{$targetID})) {
+			if (AI::state() == AI::AUTO() && ($accountID eq $targetID or $char->{slaves} && $char->{slaves}{$targetID})) {
 				# object under our control
 				my $teleport = 0;
 				if (mon_control($monster->{name},$monster->{nameID})->{teleport_auto} == 2 && $damage){
@@ -3688,10 +4200,16 @@ sub updateDamageTables {
 						$monster, $player, $config{$player->{configPrefix}.'teleportAuto_maxDmgInLock'}), "teleport";
 					$teleport = 1;
 
-				} elsif (AI::inQueue("sitAuto") && $config{$player->{configPrefix}.'teleportAuto_attackedWhenSitting'}
-							&& $damage) {
-					message TF("%s hit %s while you are sitting. Teleporting...\n",
-						$monster, $player), "teleport";
+				} elsif (($player->{sitting} || AI::inQueue("sitAuto"))
+							&& $config{$player->{configPrefix}.'teleportAuto_attackedWhenSitting'}
+							&& ($damage || $config{$player->{configPrefix}.'teleportAuto_attackedWhenSitting'} == 2)) {
+					if ($damage) {
+						message TF("%s hit %s while you are sitting. Teleporting...\n",
+							$monster, $player), "teleport";
+					} else {
+						message TF("%s attacked %s while you are sitting. Teleporting...\n",
+							$monster, $player), "teleport";
+					}
 					$teleport = 1;
 
 				} elsif ($config{$player->{configPrefix}.'teleportAuto_totalDmg'}
@@ -3801,8 +4319,51 @@ sub canUseTeleport {
 	# not in game
 	return 0 if $net && $net->getState != Network::IN_GAME; # $net check is to not crash test
 
-	# 1 - check for items
+	my $current_map = $field ? $field->baseName : undef;
+	my $randomTeleportBlocked = isRandomTeleportBlockedOnMap($current_map);
+	my $teleportSkillBlocked = isTeleportSkillBlockedOnMap($current_map);
+	my $returnTeleportBlocked = isReturnTeleportBlockedOnMap($current_map);
 	my $item;
+
+	if ($use_lvl == 1) {
+		return 0 if $randomTeleportBlocked;
+	} elsif ($use_lvl == 2) {
+		my $itemAvailable = 0;
+		if (!$returnTeleportBlocked) {
+			if ($config{teleportAuto_item2}) {
+				$item = $char->inventory->getByName($config{teleportAuto_item2});
+				$item = $char->inventory->getByNameID($config{teleportAuto_item2}) if (!($item) && $config{teleportAuto_item2} =~ /^\d{3,}$/);
+			}
+			$item = getButterflyWing() unless $item;
+			if ($item) {
+				my $cooldown = $char->{last_teleport_item_use}{$item->{nameID}};
+				my $cooldownActive = (
+					ref($cooldown) eq 'HASH'
+					&& $cooldown->{timeout}
+					&& !timeOut($cooldown->{time}, $cooldown->{timeout})
+				);
+
+				my $equipRequirementSatisfied = (
+					!$item->equippable
+					|| !$item->{type_equip}
+					|| $item->{equipped}
+					|| $item->{identified}
+				);
+
+				$itemAvailable = 1 if (!$cooldownActive && $equipRequirementSatisfied);
+			}
+		}
+
+		my $chatAvailable = (!$returnTeleportBlocked && $config{saveMap_warpChatCommand}) ? 1 : 0;
+		my $equipAvailable = (!$teleportSkillBlocked && Actor::Item::scanConfigAndCheck('teleportAuto_equip')) ? 1 : 0;
+		my $skill_level = ($char->{skills}{AL_TELEPORT}{lv}) ? $char->{skills}{AL_TELEPORT}{lv} : 0;
+		my $skillAvailable = (!$teleportSkillBlocked && $skill_level >= $use_lvl) ? 1 : 0;
+
+		return 1 if ($itemAvailable || $chatAvailable || $equipAvailable || $skillAvailable);
+		return 0;
+	}
+
+	# 1 - check for usable items
 	if($use_lvl == 1) {
 		if ($config{teleportAuto_item1}) {
 			$item = $char->inventory->getByName($config{teleportAuto_item1});
@@ -3810,14 +4371,30 @@ sub canUseTeleport {
 		}
 		$item = getFlyWing() unless $item;
 	} else {
-		 if ($config{teleportAuto_item2}) {
+		if ($config{teleportAuto_item2}) {
 			$item = $char->inventory->getByName($config{teleportAuto_item2});
 			$item = $char->inventory->getByNameID($config{teleportAuto_item2}) if (!($item) && $config{teleportAuto_item2} =~ /^\d{3,}$/);
 		}
 		$item = getButterflyWing() unless $item;
 	}
 
-	return 1 if $item;
+	if ($item) {
+		my $cooldown = $char->{last_teleport_item_use}{$item->{nameID}};
+		my $cooldownActive = (
+			ref($cooldown) eq 'HASH'
+			&& $cooldown->{timeout}
+			&& !timeOut($cooldown->{time}, $cooldown->{timeout})
+		);
+
+		my $equipRequirementSatisfied = (
+			!$item->equippable
+			|| !$item->{type_equip}
+			|| $item->{equipped}
+			|| $item->{identified}
+		);
+
+		return 1 if (!$cooldownActive && $equipRequirementSatisfied);
+	}
 	
 	# Mute prevents talking, usage of skills, and commands.
 	return 0 if $char->{'muted'};
@@ -3940,17 +4517,45 @@ sub writeStorageLog {
 	}
 }
 
+sub _targetWillLeaveClientSightSoon {
+	my ($actor, $target) = @_;
+
+	return unless ($timeout{ai_future_reachability_lookup}{timeout});
+
+	return 0 unless ($field && $actor && $target);
+	return 0 unless ($actor->{pos} && $actor->{pos_to} && $target->{pos} && $target->{pos_to});
+
+	my $clientSight = $config{clientSight} || 17;
+
+	my $delta = $timeout{ai_future_reachability_lookup}{timeout};
+
+	my $futureActorPos = calcPosFromPathfinding($field, $actor, $delta);
+	my $futureTargetPos = calcPosFromPathfinding($field, $target, $delta);
+	my $futureDist = blockDistance($futureActorPos, $futureTargetPos);
+
+	if ($futureDist >= $clientSight) {
+		debug TF("[getBestTarget] Rejecting unstable edge target %s. Predicted dist in %.1fs %d.\n",
+			$target, $delta, $futureDist), 'ai_attack';
+		return 1;
+	}
+
+	return 0;
+}
+
 ##
-# getBestTarget(possibleTargets, attackCheckLOS, $attackCanSnipe)
+# getBestTarget(possibleTargets, attackCheckLOS, $attackCanSnipe, $actor, $configPrefix)
 # possibleTargets: reference to an array of monsters' IDs
 # attackCheckLOS: if set, non-LOS monsters are checked up
 #
 # Returns ID of the best target
 sub getBestTarget {
-	my ($possibleTargets, $attackCheckLOS, $attackCanSnipe) = @_;
+	my ($possibleTargets, $attackCheckLOS, $attackCanSnipe, $actor, $configPrefix) = @_;
 	if (!$possibleTargets) {
 		return;
 	}
+
+	$actor ||= $char;
+	$configPrefix ||= '';
 
 	my $portalDist = $config{'attackMinPortalDistance'} || 4;
 	my $playerDist = $config{'attackMinPlayerDistance'} || 1;
@@ -3958,18 +4563,30 @@ sub getBestTarget {
 	my @noLOSMonsters;
 	my @noLOSMonsters_pos;
 	# TODO: Is there any situation where we should use calcPosFromPathfinding or calcPosFromTime here?
-	my $myPos = calcPosFromPathfinding($field, $char);
+	my $actorPos = calcPosFromPathfinding($field, $actor);
+
 	my ($highestPri, $smallestDist, $bestTarget);
 
 	# First of all we check monsters in LOS, then the rest of monsters
+	
+	my %plugin_args;
+	$plugin_args{possibleTargets} = $possibleTargets;
+	$plugin_args{attackCheckLOS} = $attackCheckLOS;
+	$plugin_args{attackCanSnipe} = $attackCanSnipe;
+	$plugin_args{actor} = $actor;
+	$plugin_args{configPrefix} = $configPrefix;
+	$plugin_args{return} = 0;
+	Plugins::callHook('getBestTarget' => \%plugin_args);
 
 	foreach (@{$possibleTargets}) {
 		my $monster = $monsters{$_};
 		# TODO: Is there any situation where we should use calcPosFromPathfinding or calcPosFromTime here?
-		my $pos = calcPosFromPathfinding($field, $monster);
-		next if (positionNearPlayer($pos, $playerDist)
-			|| positionNearPortal($pos, $portalDist)
+		my $targetPos = calcPosFromPathfinding($field, $monster);
+
+		next if (positionNearPlayer($targetPos, $playerDist)
+			|| positionNearPortal($targetPos, $portalDist)
 		);
+
 		my $control = mon_control($monster->{name},$monster->{nameID});
 		if (defined $control) {
 			next if ( ($control->{attack_auto} == -1)
@@ -3981,25 +4598,17 @@ sub getBestTarget {
 				|| ($control->{attack_auto} == 0 && !($monster->{dmgToYou} || $monster->{missedYou}))
 			);
 		}
-		
-		my %plugin_args;
-		$plugin_args{target} = $monster;
-		$plugin_args{control} = $control;
-		$plugin_args{attackCheckLOS} = $attackCheckLOS;
-		$plugin_args{attackCanSnipe} = $attackCanSnipe;
-		$plugin_args{return} = 0;
-		Plugins::callHook('getBestTarget' => \%plugin_args);
-		next if ($plugin_args{return});
 
-		if (!$field->checkLOS($myPos, $pos, $attackCanSnipe)) {
+		next if (_targetWillLeaveClientSightSoon($char, $monster));
+
+		if (!$field->checkLOS($actorPos, $targetPos, $attackCanSnipe)) {
 			push(@noLOSMonsters, $_);
-			push(@noLOSMonsters_pos, $pos);
+			push(@noLOSMonsters_pos, $targetPos);
 			next;
 		}
 
-		my $name = lc $monster->{name};
-		my $dist = adjustedBlockDistance($myPos, $pos);
-		my $priority = $priority{$name} ? $priority{$name} : 0;
+		my $dist = adjustedBlockDistance($actorPos, $targetPos);
+		my $priority = monsterPriority($monster->{name}, $monster->{nameID});
 
 		if (!defined($bestTarget) || ($priority > $highestPri)) {
 			$highestPri = $priority;
@@ -4014,8 +4623,8 @@ sub getBestTarget {
 		}
 	}
 	if ($attackCheckLOS && !$bestTarget && scalar(@noLOSMonsters) > 0) {
-		my $pathfinding = new PathFinding;
-		my ($min_pathfinding_x, $min_pathfinding_y, $max_pathfinding_x, $max_pathfinding_y) = $field->getSquareEdgesFromCoord($myPos, $config{attackRouteMaxPathDistance});
+		require Task::Route;
+		my $solution;
 		foreach my $index (0..$#noLOSMonsters) {
 			
 			# The most optimal solution is to include the path lenghts' comparison, however it will take
@@ -4023,36 +4632,30 @@ sub getBestTarget {
 
 			my $monster = $monsters{$noLOSMonsters[$index]};
 			# TODO: Is there any situation where we should use calcPosFromPathfinding or calcPosFromTime here?
-			my $pos = $noLOSMonsters_pos[$index];
+			my $targetPos = $noLOSMonsters_pos[$index];
 
 			# avoid get targets away from attackRouteMaxPathDistance
-			next if(blockDistance($myPos, $pos) >= $config{attackRouteMaxPathDistance});
+			next if(blockDistance($actorPos, $targetPos) >= $config{attackRouteMaxPathDistance});
 
-			$pathfinding->reset(
-				start => $myPos,
-				dest  => $pos,
-				field => $field,
-				avoidWalls => 0,
-				randomFactor => 0,
-				useManhattan => 0,
-				min_x => $min_pathfinding_x,
-				max_x => $max_pathfinding_x,
-				min_y => $min_pathfinding_y,
-				max_y => $max_pathfinding_y
-			);
-			my $dist = $pathfinding->runcount;
-			if ($dist <= 0 || $dist > $config{attackRouteMaxPathDistance}) {
-				$monster->{attack_failedLOS} = time;
+			@{$solution} = ();
+			unless (Task::Route->getRoute($solution, $field, $actorPos, $targetPos, $config{'route_avoidWalls'}, 0, 0, 1, 1)) {
+				next;
+			}
+
+			if (scalar @{$solution} == 0) {
 				next;
 			}
 			
-			my $name = lc $monster->{name};
-			my $priority = $priority{$name} ? $priority{$name} : 0;
+			my $dist = scalar @{$solution};
+			
+			my $priority = monsterPriority($monster->{name}, $monster->{nameID});
+
 			if (!defined($bestTarget) || ($priority > $highestPri)) {
 				$highestPri = $priority;
 				$smallestDist = $dist;
 				$bestTarget = $noLOSMonsters[$index];
 			}
+
 			if ((!defined($bestTarget) || $priority == $highestPri)
 			  && (!defined($smallestDist) || $dist < $smallestDist)) {
 				$highestPri = $priority;
@@ -4497,6 +5100,16 @@ sub compilePortals {
 		}
 	}
 
+	# teleport_items
+	for my $entry (@{$teleport_items{list} || []}) {
+		next unless $entry && ref($entry) eq 'HASH';
+		next unless ($entry->{destMap} && defined $entry->{destX} && defined $entry->{destY});
+
+		my $portal = join(' ', $entry->{destMap}, int($entry->{destX}), int($entry->{destY}));
+		$mapSpawns{$entry->{destMap}}{$portal}{x} = $entry->{destX};
+		$mapSpawns{$entry->{destMap}}{$portal}{y} = $entry->{destY};
+	}
+
 	$pathfinding = new PathFinding if (!$checkOnly);
 
 	# Calculate LOS values from each spawn point per map to other portals on same map
@@ -4666,6 +5279,22 @@ sub monKilled {
 	}
 }
 
+# Resolves an actor ID into a name, getActorName returns nameString and this is also safer
+# as it checks for ID definition
+sub getActorNameSafe {
+	my ($id) = @_;
+
+	return unless (defined $id);
+
+	my $actor = Actor::get($id);
+	return unless ($actor);
+
+	my $name = $actor->name;
+	return unless ($name);
+
+	return $name;
+}
+
 # Resolves a player or monster ID into a name
 # Obsoleted by Actor module, don't use this!
 sub getActorName {
@@ -4748,9 +5377,9 @@ sub checkSelfCondition {
 	return 0 if (!$prefix);
 	return 0 if ($config{$prefix . "_disabled"});
 
-	return 0 if ($config{$prefix."_whenIdle"} && !AI::isIdle);
+	return 0 if ($config{$prefix."_whenIdle"} && !AI::isIdle());
 
-	return 0 if ($config{$prefix."_whenNotIdle"} && AI::isIdle);
+	return 0 if ($config{$prefix."_whenNotIdle"} && AI::isIdle());
 	
 	# TODO: Is there any situation where we should use calcPosFromPathfinding or calcPosFromTime here in these checks?
 
@@ -4758,11 +5387,11 @@ sub checkSelfCondition {
 	# *_manualAI 1 = manual only
 	# *_manualAI 2 = auto or manual
 	if ($config{$prefix . "_manualAI"} == 0 || !(defined $config{$prefix . "_manualAI"})) {
-		return 0 unless AI::state == AI::AUTO;
+		return 0 unless AI::state() == AI::AUTO();
 	} elsif ($config{$prefix . "_manualAI"} == 1){
-		return 0 unless AI::state == AI::MANUAL;
+		return 0 unless AI::state() == AI::MANUAL();
 	} else {
-		return 0 if AI::state == AI::OFF;
+		return 0 if AI::state() == AI::OFF();
 	}
 
 	if ($config{$prefix . "_hp"}) {
@@ -4924,6 +5553,9 @@ sub checkSelfCondition {
 							|| $config{$prefix."_equip_leftHand"}
 							|| $config{$prefix."_equip_rightHand"}
 							|| $config{$prefix."_equip_robe"}
+							|| $config{$prefix."_equip_topHead"}
+							|| $config{$prefix."_equip_midHead"}
+							|| $config{$prefix."_equip_lowHead"}
 							);
 			return 0 unless ($char->{sp} >= $skill->getSP($config{$prefix . "_lvl"} || $char->getSkillLevel($skill)));
 			
@@ -5084,6 +5716,23 @@ sub checkSelfCondition {
 
 	if ($config{$prefix."_onlyWhenSafe"}) {
 		return 0 if !isSafe();
+	}
+
+	if (exists $config{$prefix."_nearPortal"} && defined $config{$prefix."_nearPortal"}) {
+		my $is_portal_near = 0;
+		my $pos = calcPosition($char);
+		for my $portal (@$portalsList) {
+			if (blockDistance($pos, $portal->{pos}) <= 2) {
+				$is_portal_near = 1;
+				last;
+			}
+		}
+		if ($config{$prefix."_nearPortal"} == 0) {
+			return 0 if ($is_portal_near);
+
+		} elsif ($config{$prefix."_nearPortal"} == 1) {
+			return 0 unless ($is_portal_near);
+		}
 	}
 
 	if ($config{$prefix."_inMap"}) {
@@ -5699,6 +6348,177 @@ sub inLockMap {
 	}
 }
 
+##
+# int|undef _normalizeAttackAutoMode(value)
+# value: raw config value to normalize.
+#
+# Normalizes an attackAuto-style value into the supported range.
+# This helper is intended for internal use by the attack-mode selectors.
+#
+# Returns:
+#  undef if the value is undefined or blank.
+#  -1 if the value is below -1.
+#  0, 1 or 2 if the value is inside the supported range.
+#  2 if the value is above 2.
+sub _normalizeAttackAutoMode {
+	my ($value) = @_;
+
+	return undef if !defined $value || $value eq '';
+	$value = int($value);
+	$value = -1 if $value < -1;
+	$value = 2 if $value > 2;
+
+	return $value;
+}
+
+##
+# int|undef _normalizeAttackOnRoute(value)
+# value: raw route attack mode to normalize.
+#
+# Normalizes an attackOnRoute-style value into the supported range.
+# Unlike attackAuto, route attack values are clamped to 0..2.
+#
+# Returns:
+#  undef if the value is undefined or blank.
+#  0, 1 or 2 if the value is inside the supported range.
+#  0 if the value is below 0.
+#  2 if the value is above 2.
+sub _normalizeAttackOnRoute {
+	my ($value) = @_;
+
+	return undef if !defined $value || $value eq '';
+	$value = int($value);
+	$value = 0 if $value < 0;
+	$value = 2 if $value > 2;
+
+	return $value;
+}
+
+##
+# int|undef getAttackAutoModeForContext(context, [prefix])
+# context: logical attack context name. Supported values are
+#          'routeToLock' and 'outOfLock'.
+# prefix: optional config prefix, such as 'mercenary_' or 'homunculus_'.
+#
+# Resolves the configured attackAuto mode for a specific context.
+# The function prefers the new context-specific keys first, then falls back
+# to legacy behavior based on attackAuto_inLockOnly, and finally to the
+# base attackAuto setting.
+#
+# Returns:
+#  undef if the resolved config value is blank or undefined.
+#  -1, 0, 1 or 2 for the resolved attack mode.
+#  The base attackAuto mode immediately if no lockMap is configured.
+#  For 'routeToLock':
+#    attackAuto_routeToLock when present;
+#    otherwise 1 if attackAuto_inLockOnly == 1;
+#    otherwise 0 if attackAuto_inLockOnly > 1;
+#    otherwise the base attackAuto mode.
+#  For 'outOfLock':
+#    attackAuto_outOfLock when present;
+#    otherwise 0 if attackAuto_inLockOnly > 1;
+#    otherwise the base attackAuto mode.
+sub getAttackAutoModeForContext {
+	my ($context, $prefix) = @_;
+
+	$prefix ||= '';
+	my $defaultMode = _normalizeAttackAutoMode($config{$prefix . 'attackAuto'});
+	return $defaultMode if !$config{'lockMap'};
+
+	if ($context eq 'routeToLock') {
+		my $mode = _normalizeAttackAutoMode($config{$prefix . 'attackAuto_routeToLock'});
+		return $mode if defined $mode;
+
+		return 1 if defined $config{$prefix . 'attackAuto_inLockOnly'} && $config{$prefix . 'attackAuto_inLockOnly'} == 1;
+		return 0 if defined $config{$prefix . 'attackAuto_inLockOnly'} && $config{$prefix . 'attackAuto_inLockOnly'} > 1;
+	} elsif ($context eq 'outOfLock') {
+		my $mode = _normalizeAttackAutoMode($config{$prefix . 'attackAuto_outOfLock'});
+		return $mode if defined $mode;
+
+		return 0 if defined $config{$prefix . 'attackAuto_inLockOnly'} && $config{$prefix . 'attackAuto_inLockOnly'} > 1;
+	}
+
+	return $defaultMode;
+}
+
+##
+# int|undef getAttackAutoMode([prefix], [routeArgs])
+# prefix: optional config prefix, such as 'mercenary_' or 'homunculus_'.
+# routeArgs: optional current route task args hash.
+#
+# Resolves the effective attackAuto mode for the actor's current situation.
+# If the actor is in lockMap, or no lockMap is configured, this returns the
+# base attackAuto setting. Outside lockMap it determines whether the actor
+# is currently routing to lockMap and delegates to getAttackAutoModeForContext().
+#
+# If routeArgs is omitted, the function inspects the current player route or
+# mapRoute task to determine whether isToLockMap is active.
+#
+# Returns:
+#  undef if the resolved config value is blank or undefined.
+#  -1, 0, 1 or 2 for the effective attack mode.
+#  The base attackAuto mode when there is no lockMap or when already in lockMap.
+#  The 'routeToLock' context mode when outside lockMap and routing to it.
+#  The 'outOfLock' context mode when outside lockMap and not routing to it.
+sub getAttackAutoMode {
+	my ($prefix, $routeArgs) = @_;
+
+	$prefix ||= '';
+	return _normalizeAttackAutoMode($config{$prefix . 'attackAuto'}) if !$config{'lockMap'} || inLockMap();
+
+	if (!$routeArgs) {
+		my $routeIndex = AI::findAction("route");
+		$routeIndex = AI::findAction("mapRoute") if !defined $routeIndex;
+		$routeArgs = AI::args($routeIndex) if defined $routeIndex;
+	}
+
+	my $context = ($routeArgs && $routeArgs->{isToLockMap}) ? 'routeToLock' : 'outOfLock';
+	return getAttackAutoModeForContext($context, $prefix);
+}
+
+##
+# int getEffectiveAttackOnRoute([routeArgs], [prefix])
+# routeArgs: optional route or mapRoute args hash. The function reads the
+#            attackOnRoute key from it when available.
+# prefix: optional config prefix, such as 'mercenary_' or 'homunculus_'.
+#
+# Computes the effective auto-attack mode after combining:
+#  1. the current context-sensitive attackAuto mode, and
+#  2. the route task's attackOnRoute permission.
+#
+# attackAuto modes use the semantic scale:
+#  -1 = never attack
+#   0 = retaliate only when attacked by the monster itself
+#   1 = assist self/master/party/slaves
+#   2 = aggressive auto-attack
+#
+# attackOnRoute permissions use the routing scale:
+#   0 = never stop routing to attack
+#   1 = allow reactive/assist attacks while routing
+#   2 = allow aggressive attacks while routing
+#
+# Returns:
+#  -1 if the resolved attackAuto mode is undefined or below 0.
+#  -1 if routeArgs explicitly disables route attacks with attackOnRoute <= 0.
+#  0, 1 or 2 otherwise, using the lower of the attackAuto mode and the
+#  route permission.
+#  If routeArgs is omitted or lacks attackOnRoute, the route side defaults to 2.
+sub getEffectiveAttackOnRoute {
+	my ($routeArgs, $prefix) = @_;
+
+	$prefix ||= '';
+	my $attackOnRoute = defined $routeArgs
+		? _normalizeAttackOnRoute($routeArgs->{attackOnRoute})
+		: 2;
+	$attackOnRoute = 2 if !defined $attackOnRoute;
+
+	my $attackAuto = getAttackAutoMode($prefix, $routeArgs);
+	return -1 if !defined $attackAuto || $attackAuto < 0;
+	return -1 if $attackOnRoute <= 0;
+
+	return $attackOnRoute > $attackAuto ? $attackAuto : $attackOnRoute;
+}
+
 sub parseReload {
 	my ($args) = @_;
 	eval {
@@ -5887,7 +6707,7 @@ sub solveMSG {
 		}
 	}
 	warning TF("Unknown msgid: %d. Need to update the file msgstringtable.txt (from data.grf)\n", --$id) if !$msgTable[$id];
-
+	Plugins::callHook('solveMSG', { msg => \$msg });
 	return $msg;
 }
 
@@ -5933,6 +6753,7 @@ sub solveMessage {
 	if ($msg =~ /<ITEML>([a-zA-Z0-9%&(),+\-*]*)<\/ITEML>/) {
 		$msg =~ s/<ITEML>([a-zA-Z0-9%&(),+\-*]*)<\/ITEML>/solveItemLink($1)/eg;
 	}
+	Plugins::callHook('solveMessage', { msg => \$msg });
 	return $msg;
 }
 
@@ -5970,6 +6791,194 @@ sub autoNpcTalk {
 	});
 }
 
+sub isTeleportItemEquipRequirementSatisfied {
+	my ($entry) = @_;
+	return 1 unless ($entry->{requiredEquipSlot} && defined $entry->{requiredEquipItemID});
+
+	my ($required_slot, $required_item) = _getTeleportItemEquipRequirementContext($entry);
+	return 0 unless ($required_item && $required_item->{equipped});
+	return $required_item->equippedInSlot($required_slot);
+}
+
+sub canTeleportItemEquipRequirementBeSatisfied {
+	my ($entry) = @_;
+	return 1 unless ($entry->{requiredEquipSlot} && defined $entry->{requiredEquipItemID});
+
+	my ($required_slot, $required_item) = _getTeleportItemEquipRequirementContext($entry);
+	return 0 unless $required_item;
+	return 1 if $required_item->{equipped} && $required_item->equippedInSlot($required_slot);
+	return $required_item->equippable();
+}
+
+sub tryEquipTeleportItemRequirement {
+	my ($entry) = @_;
+	return 1 if isTeleportItemEquipRequirementSatisfied($entry);
+	return 0 unless canTeleportItemEquipRequirementBeSatisfied($entry);
+
+	my ($required_slot, $required_item) = _getTeleportItemEquipRequirementContext($entry);
+	return 0 unless $required_item;
+	$required_item->equipInSlot($required_slot);
+	return 0;
+}
+
+sub _getTeleportItemEquipRequirementContext {
+	my ($entry) = @_;
+	return unless ($entry->{requiredEquipSlot} && defined $entry->{requiredEquipItemID});
+
+	my $required_slot = _normalizeEquipSlotName($entry->{requiredEquipSlot});
+	return unless (exists $equipSlot_rlut{$required_slot} && defined $equipSlot_rlut{$required_slot});
+	my $required_item = $char->inventory->getByNameID($entry->{requiredEquipItemID});
+	return ($required_slot, $required_item);
+}
+
+sub _normalizeEquipSlotName {
+	my ($slot) = @_;
+	return $slot unless defined $slot;
+	return $slot if (exists $equipSlot_rlut{$slot} && defined $equipSlot_rlut{$slot});
+
+	for my $known_slot (keys %equipSlot_rlut) {
+		next unless defined $known_slot;
+		return $known_slot if $known_slot =~ /^\Q$slot\E$/i;
+	}
+	return $slot;
+}
+
+sub registerTeleportItemPendingUse {
+	my ($itemID) = @_;
+	return unless $char && defined $itemID;
+	$char->{pending_teleport_item_use} = {
+		itemID => int($itemID),
+		time => time,
+	};
+}
+
+sub clearTeleportItemPendingUse {
+	my ($itemID) = @_;
+	return unless $char && $char->{pending_teleport_item_use};
+	if (!defined $itemID || $char->{pending_teleport_item_use}{itemID} == $itemID) {
+		delete $char->{pending_teleport_item_use};
+	}
+}
+
+sub _getTeleportItemTimeoutSec {
+	my ($itemID) = @_;
+	return 0 unless ($teleport_items{list} && @{$teleport_items{list}});
+
+	my $timeout = 0;
+	for my $entry (@{$teleport_items{list}}) {
+		next unless defined $entry->{itemID} && $entry->{itemID} == $itemID;
+		next unless $entry->{timeoutSec};
+		$timeout = $entry->{timeoutSec} if $entry->{timeoutSec} > $timeout;
+	}
+	return $timeout;
+}
+
+sub getTeleportItemCooldownTimeoutSec {
+	my ($itemID) = @_;
+	return 0 unless ($char && defined $itemID);
+
+	my $entry = $char->{last_teleport_item_use}{$itemID};
+	if (ref($entry) eq 'HASH' && $entry->{timeout}) {
+		return $entry->{timeout};
+	}
+	return _getTeleportItemTimeoutSec($itemID);
+}
+
+sub setTeleportItemCooldownEntry {
+	my ($itemID, $usedAt, $timeout) = @_;
+	return unless ($char && defined $itemID);
+	return unless ($timeout && $timeout > 0);
+	$usedAt = time unless defined $usedAt;
+
+	$char->{last_teleport_item_use}{$itemID} = {
+		time => $usedAt,
+		timeout => $timeout,
+	};
+}
+
+sub markTeleportItemUsed {
+	my ($itemID, $usedAt) = @_;
+	return unless ($char && defined $itemID);
+	$usedAt = time unless defined $usedAt;
+
+	my $timeout = _getTeleportItemTimeoutSec($itemID);
+	setTeleportItemCooldownEntry($itemID, $usedAt, $timeout);
+	clearTeleportItemPendingUse($itemID);
+}
+
+sub setTeleportItemCooldownFromRemainingSeconds {
+	my ($remainingSec, $itemID) = @_;
+	return unless ($char && defined $remainingSec && $remainingSec > 0);
+
+	if (!defined $itemID && $char->{pending_teleport_item_use}) {
+		$itemID = $char->{pending_teleport_item_use}{itemID};
+	}
+	return unless defined $itemID;
+
+	my $timeout = _getTeleportItemTimeoutSec($itemID);
+	if ($timeout > 0) {
+		my $lastUse = time - $timeout + $remainingSec;
+		$lastUse = time if $lastUse > time;
+		setTeleportItemCooldownEntry($itemID, $lastUse, $timeout);
+	}
+	clearTeleportItemPendingUse($itemID);
+}
+
+sub getTeleportItemCooldownRemainingSec {
+	my ($entry, $now) = @_;
+	return 0 unless ($entry && $entry->{timeoutSec} && defined $entry->{itemID});
+	return 0 unless ($char && $char->{last_teleport_item_use} && $char->{last_teleport_item_use}{$entry->{itemID}});
+	return 0 unless ref($char->{last_teleport_item_use}{$entry->{itemID}}) eq 'HASH';
+
+	$now = time unless defined $now;
+	my $elapsed = $now - $char->{last_teleport_item_use}{$entry->{itemID}}{time};
+	my $remaining = int($entry->{timeoutSec} - $elapsed);
+	return 0 if $remaining <= 0;
+	return $remaining;
+}
+
+sub isTeleportItemEntryWithinLevelRange {
+	my ($entry, $level) = @_;
+	return 0 unless $entry;
+
+	$level = $char->{lv} if !defined $level && $char;
+	return 0 unless defined $level;
+	return 0 if ($entry->{minLevel} && $level < $entry->{minLevel});
+	return 0 if ($entry->{maxLevel} && $level > $entry->{maxLevel});
+	return 1;
+}
+
+sub getTeleportItemFromTable {
+	my ($mode, %args) = @_;
+	return unless $char && $char->inventory && $char->inventory->isReady();
+	return unless ($teleport_items{list} && @{$teleport_items{list}});
+	return if ($field && $mode eq 'random'  && isRandomTeleportBlockedOnMap($field->baseName));
+	return if ($field && $mode eq 'respawn' && isReturnTeleportBlockedOnMap($field->baseName));
+
+	my $target_map = defined $args{destMap} ? lc $args{destMap} : '';
+
+	for my $entry (@{$teleport_items{list}}) {
+		next unless ($entry);
+		next if ($entry->{mode} ne 'any' && $entry->{mode} ne $mode);
+		next unless isTeleportItemEntryWithinLevelRange($entry, $char->{lv});
+
+		my $entry_map = lc($entry->{destMap} || '');
+		if ($target_map ne '' && $entry_map ne '' && $entry_map ne '*' && $entry_map ne 'any' && $entry_map ne 'save') {
+			next if $entry_map ne $target_map;
+		}
+
+		my $item = $char->inventory->getByNameID($entry->{itemID});
+		next unless $item;
+		next unless isTeleportItemEquipRequirementSatisfied($entry);
+
+		next if getTeleportItemCooldownRemainingSec($entry) > 0;
+
+		return ($item, $entry);
+	}
+
+	return;
+}
+
 sub getFlyWing {
 	return undef if ($field && isRandomTeleportBlockedOnMap($field->baseName));
 	# 12887 - Unlimited Fly Wing
@@ -6001,4 +7010,68 @@ sub getEdenGroupMark {
 	return $char->inventory->getByNameID(22508);
 }
 
+sub print_callers {
+	message "[print_callers] Printing start\n";
+    my @callers;
+    my $level = 1;
+    while (my @info = caller($level)) {
+        my $sub_name = $info[3] ? $info[3] : "TOP in $info[0]";
+        push @callers, {
+            package  => $info[0],
+            file     => $info[1],
+            line     => $info[2],
+            sub_name => $sub_name,
+        };
+        last if @callers >= 7;
+        $level++;
+    }
+    
+    message "Last " . scalar(@callers) . " callers:\n";
+    for my $i (0 .. $#callers) {
+        message TF("#%d: %s at %s line %d\n",
+            $i + 1,
+            $callers[$i]{sub_name},
+            $callers[$i]{file},
+            $callers[$i]{line});
+    }
+	message "[print_callers] Printing end\n";
+}
+
+sub get_lockMap_cell {
+	my $lockField = shift;
+	$lockField = $field if (!defined $lockField);
+
+	my $cell;
+
+	my $i = 500;
+	my $width = $lockField->width;
+	my $height = $lockField->height;
+
+	my $max_x = $width -1;
+	my $max_y = $height -1;
+
+	my %dropDestinationCells;
+	my %plugin_args = ( cells => \%dropDestinationCells, field => $lockField, caller => 'get_lockMap_cell' );
+	Plugins::callHook('add_dropDestinationCells' => \%plugin_args);
+
+	do {
+		if ($config{'lockMap_x'} ne '') {
+			$cell->{x} = $config{'lockMap_x'};
+			$cell->{x} += (int(rand(2*$config{'lockMap_randX'})) - $config{'lockMap_randX'}) if ($config{'lockMap_randX'} > 0);
+		} else {
+			$cell->{x} = int(rand($width));
+		}
+		if ($config{'lockMap_y'} ne '') {
+			$cell->{y} = $config{'lockMap_y'};
+			$cell->{y} += (int(rand(2*$config{'lockMap_randY'})) - $config{'lockMap_randY'}) if ($config{'lockMap_randY'} > 0);
+		} else {
+			$cell->{y} = int(rand($height));
+		}
+	} while (--$i && (!$lockField->isWalkable($cell->{x}, $cell->{y}) || $cell->{x} <= 0 || $cell->{y} <= 0 || $cell->{x} >= $max_x || $cell->{y} >= $max_y || (exists $dropDestinationCells{$cell->{x}} && exists $dropDestinationCells{$cell->{x}}{$cell->{y}})));
+
+	return undef if (!$i);
+	return $cell;
+}
+
 return 1;
+

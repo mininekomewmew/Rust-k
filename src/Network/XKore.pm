@@ -577,33 +577,26 @@ sub hackClient {
 #}
 sub onClientData {
 	my ($self, $msg) = @_;
+	my $additional_data;
 	my $type;
+
+	while (my $message = $self->{tokenizer}->readNext(\$type)) {
+		$msg .= $message;
+	}
+	$self->decryptMessageID(\$msg);
+
+	$msg = $self->{tokenizer}->slicePacket($msg, \$additional_data); # slice packet if needed
 
 	$self->{tokenizer}->add($msg, 1);
 
-	while (my $message = $self->{tokenizer}->readNext(\$type)) {
-		my $switch = uc(unpack("H2", substr($message, 1, 1))) . uc(unpack("H2", substr($message, 0, 1)));
+	$messageSender->sendToServer($_) for $messageSender->process(
+		$self->{tokenizer}, $clientPacketHandler
+	);
 
-		# Prevent forwarding login packets to the Map Server
-		if ($net->getState() >= 4) {
-			if ($switch eq "0064" || $switch eq "02B0" || $switch eq "0987" || $switch eq "0A75" || $switch eq "0A76" || $switch eq "0AAC" || $switch eq "0ACF" || $switch eq "0C26" || $switch eq "0825") {
-				warning TF("X-Kore: Dropping out-of-sync login packet from client (%s). Please ensure bot and client are synchronized.\n", $switch);
-				next;
-			}
-			if ($switch eq "0065" || $switch eq "0066" || $switch eq "00A9" || $switch eq "00B3") {
-				warning TF("X-Kore: Dropping out-of-sync character selection packet from client (%s).\n", $switch);
-				next;
-			}
-		}
+	$self->{tokenizer}->clear();
 
-		$self->decryptMessageID(\$message);
-
-		my $temp_tokenizer = Network::MessageTokenizer->new($self->getRecvPackets());
-		$temp_tokenizer->add($message, 1);
-
-		$messageSender->sendToServer($_) for $messageSender->process(
-			$temp_tokenizer, $clientPacketHandler
-		);
+	if($additional_data) {
+		$self->onClientData($additional_data);
 	}
 }
 

@@ -22,6 +22,24 @@ package Network::PacketParser;
 use strict;
 use utf8;
 use base qw(Exporter);
+use Carp::Assert;
+use Scalar::Util;
+use Time::HiRes qw(time);
+
+use Globals;
+#use Settings;
+use Log qw(message warning error debug);
+#use FileParsers;
+use I18N qw(bytesToString stringToBytes);
+use Interface;
+use Network;
+use Network::MessageTokenizer;
+use Misc;
+use Plugins;
+use Utils;
+use Utils::Exceptions;
+use Utils::Crypton;
+use Translation;
 
 our @EXPORT = qw(
 	ACTION_ATTACK ACTION_ITEMPICKUP ACTION_SIT ACTION_STAND
@@ -54,28 +72,6 @@ use constant {
 	STATUS_DEX => 0x11,
 	STATUS_LUK => 0x12,
 };
-
-use Carp::Assert;
-use Scalar::Util;
-use Time::HiRes qw(time);
-use Socket qw(inet_aton);
-
-use Globals;
-#use Settings;
-use Log qw(message warning error debug);
-#use FileParsers;
-use I18N qw(bytesToString stringToBytes);
-use Interface;
-require Network;
-use Network::MessageTokenizer;
-require Misc;
-use Plugins;
-use Utils;
-use Utils::Exceptions;
-use Utils::Crypton;
-use Translation;
-use IO::Socket::INET;
-use JSON::Tiny qw(decode_json);
 
 ### CATEGORY: Hash members
 
@@ -229,14 +225,6 @@ sub parse {
 	my ($self, $msg, $handleContainer, @handleArguments) = @_;
 
 	$lastSwitch = Network::MessageTokenizer::getMessageID($msg);
-
-	# TRY PROXY FIRST
-	my $proxy_result = $self->process_via_proxy($msg);
-	if ($proxy_result && $proxy_result->{status} eq 'success') {
-		my $switch = sprintf("%04X", $proxy_result->{switch});
-		debug "Parsed via Proxy: $switch\n", "packetParser", 2;
-	}
-
 	my $handler = $self->{packet_list}{$lastSwitch};
 
 	unless ($handler) {
@@ -246,6 +234,18 @@ sub parse {
 		}
 		return undef;
 	}
+
+	# $handler->[0] may be (re)binded to $switch here for current serverType
+	# but all the distinct packets need a distinct names for that, even if they share the handler
+	# like actor_display = actor_exists + actor_connected + actor_moved
+	# if (DEBUG) {
+	# 	unless ($self->{packet_lut}{$handler->[0]} eq $switch) {
+	# 		$self->{packet_lut}{$handler->[0]} = $switch;
+	# 		if ((grep { $_ && $_->[0] eq $handler->[0] } values %{$self->{packet_list}}) > 1) {
+	# 			warning sprintf "Using %s to provide %s\n", $switch, $handler->[0];
+	# 		}
+	# 	}
+	# }
 
 	debug "Received packet: $lastSwitch Handler: $handler->[0]\n", "packetParser", 2;
 
@@ -259,7 +259,6 @@ sub parse {
 	if ($handler->[1]) {
 		@args{@{$handler->[2]}} = unpack("x2 $handler->[1]", $msg);
 	}
-
 	if (my $custom_parse = $self->can('parse_'.$handler->[0])) {
 		$self->$custom_parse(\%args);
 	}
@@ -299,44 +298,6 @@ sub unhandledMessage {
 
 	warning "Packet Parser: Unhandled Packet: $args->{switch} Handler: $self->{packet_list}{$args->{switch}}[0]\n";
 	debug ("Unpacked: " . join(', ', @{$args}{@{$args->{KEYS}}}) . "\n"), "packetParser", 2 if $args->{KEYS};
-}
-
-sub get_proxy_connection {
-	my ($self) = @_;
-	if ($self->{proxy_failed_until} && time < $self->{proxy_failed_until}) {
-		return undef;
-	}
-	if (!$self->{proxy_sock} || !$self->{proxy_sock}->connected) {
-		$self->{proxy_sock} = IO::Socket::INET->new(
-			PeerAddr => '127.0.0.1',
-			PeerPort => '9090',
-			Proto    => 'tcp',
-			Timeout  => 0.1, # Short timeout
-		);
-		if (!$self->{proxy_sock}) {
-			# Fallback for 30 seconds if proxy is down
-			$self->{proxy_failed_until} = time + 30;
-			debug "Rust Packet Proxy not available, falling back to Perl parser (30s cooldown).\n", "packetParser";
-			return undef;
-		}
-	}
-	return $self->{proxy_sock};
-}
-
-sub process_via_proxy {
-	my ($self, $raw_data) = @_;
-	my $sock = $self->get_proxy_connection();
-	return undef unless $sock;
-
-	$sock->send($raw_data);
-
-	my $response;
-	$sock->recv($response, 4096);
-
-	if ($response) {
-		return decode_json($response);
-	}
-	return undef;
 }
 
 ##
@@ -571,7 +532,7 @@ sub parseChat {
 sub reconstructChat {
 	my ($self, $args) = @_;
 	$args->{message} = '|00' . $args->{message} if $masterServer->{chatLangCode};
-	$args->{message} = stringToBytes($args->{message});
+	$args->{message} = stringToBytes($char->{name}) . ' : ' . stringToBytes($args->{message});
 }
 
 1;

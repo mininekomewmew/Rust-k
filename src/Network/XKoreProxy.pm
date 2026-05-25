@@ -22,7 +22,6 @@ package Network::XKoreProxy;
 use strict;
 use base qw(Exporter);
 use Exporter;
-use Socket;
 use IO::Socket::INET;
 use Time::HiRes qw(time usleep);
 use utf8;
@@ -318,35 +317,25 @@ sub clientRecv {
 
 sub onClientData {
 	my ($self, $msg) = @_;
+	my $additional_data;
 	my $type;
 
-	Log::debug("XKore Proxy: onClientData(" . length($msg) . " bytes)\n", "xkore_proxy");
+	while (my $message = $self->{tokenizer}->readNext(\$type)) {
+		$msg .= $message;
+	}
+	$self->decryptMessageID(\$msg);
+
+
 	$self->{tokenizer}->add($msg, 1);
 
-	while (my $message = $self->{tokenizer}->readNext(\$type)) {
-		my $switch = uc(unpack("H2", substr($message, 1, 1))) . uc(unpack("H2", substr($message, 0, 1)));
-		Log::debug("XKore Proxy: Client packet $switch (" . length($message) . " bytes)\n", "xkore_proxy");
+	$messageSender->sendToServer($_) for $messageSender->process(
+		$self->{tokenizer}, $clientPacketHandler
+	);
 
-		# Prevent forwarding login packets to the Map Server
-		if ($self->getState() >= 4) {
-			if ($switch eq "0064" || $switch eq "02B0" || $switch eq "0987" || $switch eq "0A75" || $switch eq "0A76" || $switch eq "0AAC" || $switch eq "0ACF" || $switch eq "0C26" || $switch eq "0825") {
-				warning TF("XKore Proxy: Dropping out-of-sync login packet from client (%s). Please ensure bot and client are synchronized.\n", $switch);
-				next;
-			}
-			if ($switch eq "0065" || $switch eq "0066" || $switch eq "00A9" || $switch eq "00B3") {
-				warning TF("XKore Proxy: Dropping out-of-sync character selection packet from client (%s).\n", $switch);
-				next;
-			}
-		}
+	$self->{tokenizer}->clear();
 
-		$self->decryptMessageID(\$message);
-
-		my $temp_tokenizer = Network::MessageTokenizer->new($self->getRecvPackets());
-		$temp_tokenizer->add($message, 1);
-
-		$messageSender->sendToServer($_) for $messageSender->process(
-			$temp_tokenizer, $clientPacketHandler
-		);
+	if($additional_data) {
+		$self->onClientData($additional_data);
 	}
 }
 
@@ -372,7 +361,6 @@ sub checkProxy {
 			# Tell 'em about the new client
 			my $host = $self->clientPeerHost;
 			my $port = $self->clientPeerPort;
-			Log::debug("XKore Proxy: Accepted connection from $host:$port\n", "xkore_proxy");
 			debug "XKore Proxy: RO Client connected ($host:$port).\n", "connection";
 
 			# Stop listening and clear errors.
@@ -385,7 +373,6 @@ sub checkProxy {
 	} elsif (!$self->proxyAlive) {
 		# Client disconnected... (or never existed)
 		if ($self->serverAlive()) {
-			Log::debug("XKore Proxy: Client disconnected, but server alive. Disconnecting server...\n", "xkore_proxy");
 			message T("Client disconnected\n"), "connection";
 			$self->setState(Network::NOT_CONNECTED) if ($self->getState() == Network::IN_GAME);
 			$self->{waitingClient} = 1;
@@ -404,7 +391,6 @@ sub checkProxy {
 		# (Re)start listening...
 		my $ip = $config{XKore_listenIp} || '127.0.0.1';
 		my $port = $config{XKore_listenPort} || 6901;
-		Log::debug("XKore Proxy: Restarting listener on $ip:$port\n", "xkore_proxy");
 		$self->{proxy_listen} = new IO::Socket::INET(
 			LocalAddr	=> $ip,
 			LocalPort	=> $port,
@@ -435,7 +421,6 @@ sub checkServer {
 
 	# Connect to the next server for proxying the packets
 	if (!$self->serverAlive()) {
-		Log::debug("XKore Proxy: Server NOT alive, connecting to next server...\n", "xkore_proxy");
 		# if no next server was defined by received packets, setup a primary server.
 		my $master = $masterServer = $masterServers{$config{'master'}};
 
@@ -451,10 +436,8 @@ sub checkServer {
 			message TF("Proxying to [%s]\n", $config{master}), "connection" unless ($self->{gotError});
 		}
 
-		Log::debug("XKore Proxy: serverConnect($self->{nextIp}, $self->{nextPort})\n", "xkore_proxy");
 		$self->serverConnect($self->{nextIp}, $self->{nextPort}) unless ($self->{gotError});
 		if (!$self->serverAlive()) {
-			Log::debug("XKore Proxy: serverConnect failed!\n", "xkore_proxy");
 			$self->{charServerIp} = undef;
 			$self->{charServerPort} = undef;
 			close($self->{proxy});
@@ -624,21 +607,17 @@ sub modifyPacketIn {
 
 		$self->{nextIp} = $mapInfo->{'mapIP'};
 		$self->{nextPort} = $mapInfo->{'mapPort'};
-		Log::debug("XKore Proxy: nextIp=$self->{nextIp}, nextPort=$self->{nextPort}\n", "xkore_proxy");
 		debug " next server to connect ($self->{nextIp}:$self->{nextPort})\n", "connection";
 
 		# reset key when change map-server
 		if ($currentClientKey && $messageSender->{encryption}->{crypt_key}) {
-			Log::debug("XKore Proxy: Reseting client encryption key\n", "xkore_proxy");
 			$currentClientKey = $messageSender->{encryption}->{crypt_key_1};
 			$messageSender->{encryption}->{crypt_key} = $messageSender->{encryption}->{crypt_key_1};
 		}
 
 		if ($switch eq "0071" || $switch eq "0AC5") {
-			Log::debug("XKore Proxy: Closing Character Server connection (switch=$switch)\n", "xkore_proxy");
 			message T("Closing connection to Character Server\n"), 'connection' if (!$self->{packetReplayTrial});
 		} else {
-			Log::debug("XKore Proxy: Closing Map Server connection (switch=$switch)\n", "xkore_proxy");
 			message T("Closing connection to Map Server\n"), "connection" if (!$self->{packetReplayTrial});
 		}
 		$self->serverDisconnect(1);

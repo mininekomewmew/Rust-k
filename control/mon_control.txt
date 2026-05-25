@@ -220,5 +220,3 @@ Yellow Plant 0 0 0
 1648 -1 1 0 #Whitesmith Harword
 1917 -1 1 0 #Wounded Morroc
 1658 -1 1 0 #Ygnizem
-1018 0 0 0 #Creamy
-1002 1 0 1 #Poring

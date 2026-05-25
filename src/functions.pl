@@ -217,6 +217,10 @@ sub loadDataFiles {
 		internalName => 'recvpackets.txt',
  		loader => [\&parseRecvpackets, \%rpackets]);
 
+	Settings::addTableFile('teleport_items.txt',
+		internalName => 'teleport_items.txt',
+		loader => [\&parseTeleportItems, \%teleport_items]);
+
 	# Add 'Old' table pack, if user set
 	if ( $sys{locale_compat} == 1) {
 		# Holder for new path
@@ -297,7 +301,8 @@ sub loadDataFiles {
 		loader => [\&parseSectionedFile, \%packetDescriptions], mustExist => 0);
 	Settings::addTableFile('portals.txt',
 		internalName => 'portals.txt',
-		loader => [\&parsePortals, \%portals_lut, \@portals_lut_missed]);
+		loader => [\&parsePortals, \%portals_lut, \@portals_lut_missed],
+		onLoaded => \&refreshDynamicPortalStates);
 	Settings::addTableFile('portals_commands.txt',
 		internalName => 'portals_commands.txt',
 		loader => [\&parsePortalsCommands, \%portals_commands], mustExist => 0);
@@ -391,6 +396,9 @@ sub loadDataFiles {
 	Settings::addTableFile('achievement_list.txt',
 		internalName => 'achievement_list.txt',
 		loader => [\&parseAchievementFile, \%achievements], mustExist => 0);
+	Settings::addTableFile('monsters_table.txt',
+		internalName => 'monsters_table.txt',
+		loader => [\&parseMonstersTableFile, \%monstersTable], mustExist => 0);
 
 	use utf8;
 
@@ -420,10 +428,6 @@ sub loadDataFiles {
 
 	Plugins::callHook('start3');
 
-    if ($config{networkCore} eq "rust") {
-        initRustCore();
-    }
-
 	if ($config{'secureAdminPassword'} eq '1') {
 		# This is where we induldge the paranoid and let them have session generated admin passwords
 		Log::message(T("\nGenerating session Admin Password...\n"));
@@ -436,58 +440,6 @@ sub loadDataFiles {
 	#}
 }
 
-# Call this when we hit IN_GAME state
-# Call this when we hit IN_GAME state
-sub initRustCore {
-    if ($config{networkCore} eq "rust" && $net && $net->getState() >= 4 && !$main::rust_core_started) {
-        start_rust_core();
-    }
-}
-
-our $rust_core_started = 0;
-sub start_rust_core {
-	return if $main::rust_core_started;
-	
-	my $ext = ($^O eq 'MSWin32') ? ".exe" : "";
-	my $core_bin = "src/RustCore/target/release/kore-rust-core$ext";
-	$core_bin = "src/RustCore/target/debug/kore-rust-core$ext" unless -e $core_bin;
-	$core_bin = "kore-rust-core$ext" unless -e $core_bin; # Check root too
-	$core_bin = "bin/kore-rust-core$ext" unless -e $core_bin; # Check bin folder
-	
-	if (-e $core_bin) {
-		require Cwd;
-		require File::Path;
-		my $abs_core_bin = Cwd::abs_path($core_bin);
-		my $log_dir = $Settings::logs_folder || 'logs';
-		File::Path::make_path($log_dir) unless -d $log_dir;
-		
-		# Use a unique log file per bot instance to avoid Windows file locks
-		$main::rust_core_log = File::Spec->catfile($log_dir, "rust_core_$$" . ".log");
-
-		Log::debug("Rust Core: Spawning process... log=$main::rust_core_log\n", "rust_bridge");
-		Log::message("Starting Rust Core Bridge ($abs_core_bin)...\n", "system");
-		
-		unlink($main::rust_core_log);
-		
-		# Platform-specific background spawn
-		if ($^O eq 'MSWin32') {
-			$ENV{RUST_LOG} = "info";
-			# Note the quotes around the log path to handle spaces
-			Log::debug("Rust Core: Executing system command for Windows\n", "rust_bridge");
-			system("start /B \"\" \"$abs_core_bin\" > \"$main::rust_core_log\" 2>&1");
-		} else {
-			Log::debug("Rust Core: Executing system command for Linux\n", "rust_bridge");
-			system("RUST_LOG=info \"$abs_core_bin\" > \"$main::rust_core_log\" 2>&1 &");
-		}
-		
-		$main::rust_core_started = 1;
-		Log::debug("Rust Core: start_rust_core finished.\n", "rust_bridge");
-	} else {
-		Log::warning("Rust Core binary not found ($core_bin). Hybrid features disabled. Please compile it in src/RustCore.\n");
-		$main::rust_core_started = 1; # Stop spamming
-	}
-}
-
 sub initNetworking {
 	our $XKore_dontRedirect = 0;
 	my $XKore_version = $config{XKore};
@@ -498,11 +450,7 @@ sub initNetworking {
 			# Inject DLL to running Ragnarok process
 			require Network::XKore;
 			$net = new Network::XKore;
-		} elsif ($XKore_version eq "3") {
-			# Proxy Ragnarok client connection
-			require Network::XKoreProxy;
-			$net = new Network::XKoreProxy;
-		} else {
+		} elsif ($XKore_version eq "2" || $XKore_version eq "0") {
 			# Direct connection (Standalone or XKore 2)
 			if ($config{networkCore} eq "rust") {
 				Log::message("Using Rust Network Core...\n", "system");
@@ -518,6 +466,10 @@ sub initNetworking {
 				require Network::XKore2;
 				Network::XKore2::start();
 			}
+		} elsif ($XKore_version eq "3") {
+			# Proxy Ragnarok client connection
+			require Network::XKoreProxy;
+			$net = new Network::XKoreProxy;
 		}
 	};
 	if ($@) {
@@ -882,7 +834,7 @@ sub initMapChangeVars {
 	$timeout{ai_buyAuto}{time} = time + 5;
 	$timeout{ai_shop}{time} = time;
 
-	AI::clear(qw(attack move teleport));
+	AI::clear(qw(attack move));
 	AI::SlaveManager::clear("attack", "route", "move");
 	ChatQueue::clear;
 
@@ -910,12 +862,8 @@ sub initStatVars {
 
 # This function is called every time in the main loop, when OpenKore has been
 # fully initialized.
-our $rust_core_initialized = 0;
 sub mainLoop_initialized {
 	Benchmark::begin("mainLoop_part1") if DEBUG;
-	
-	# Auto-init Rust Core if needed
-	initRustCore();
 
 	# Handle connection states
 	$net->checkConnection();
@@ -951,11 +899,26 @@ sub mainLoop_initialized {
 
 	# GameGuard support
 	if ($masterServer->{gameGuard} && ($net->version != 1 || ($net->version == 1 && $masterServer->{gameGuard} eq '2'))) {
-		my $result = Poseidon::Client::getInstance()->getResult();
-		if (defined($result)) {
-			debug "Received Poseidon result.\n", "poseidon";
-			#$messageSender->encryptMessageID(\$result, unpack("v", $result));
-			$messageSender->sendToServer($result);
+		my $instance = Poseidon::Client::getInstance();
+
+		if ($instance && $instance->isWaitingQuery()) {
+			if ($net->getState() == Network::IN_GAME) {
+				my $result = $instance->getResult();
+				if (defined($result)) {
+					debug "Received Poseidon result.\n", "poseidon";
+					#$messageSender->encryptMessageID(\$result, unpack("v", $result));
+
+					my %hookArgs;
+					$hookArgs{result} = $result;
+					$hookArgs{return} = 1;
+					Plugins::callHook('PoseidonReply', \%hookArgs);
+					return 0 if (!$hookArgs{return});
+
+					$messageSender->sendToServer($result);
+				}
+			} else {
+				$instance->reset()
+			}
 		}
 	}
 
@@ -1054,7 +1017,7 @@ sub mainLoop_initialized {
 			 || $oldMaster->{version} ne $master->{version}
 			 || $oldUsername ne $config{'username'}
 			 || $oldChar ne $config{'char'}) {
-				AI::clear;
+				AI::clear();
 				AI::SlaveManager::clear();
 				relog();
 			} else {
