@@ -5,8 +5,8 @@
 
 master Joker-RO
 server 0
-username caco1
-password wasd1111
+username 
+password 
 loginPinCode
 char 0
 otpSeed
