@@ -1,1 +1,0 @@
-{"nodes": [{"id": "interface_wx_close_img", "label": "Wx Close Icon", "file_type": "image", "source_file": "src/Interface/Wx/close.png"}], "edges": [{"source": "interface_wx_close_img", "target": "interface_wx_window_img", "relation": "conceptually_related_to", "confidence": "INFERRED", "confidence_score": 0.9, "source_file": "src/Interface/Wx/close.png"}], "hyperedges": []}

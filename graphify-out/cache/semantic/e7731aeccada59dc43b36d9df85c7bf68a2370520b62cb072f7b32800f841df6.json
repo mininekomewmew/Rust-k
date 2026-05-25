@@ -1,1 +1,0 @@
-{"nodes": [{"id": "translation_system", "label": "Translation System", "file_type": "document", "source_file": "src/po/readme.txt", "source_location": null, "rationale": "I18n and l10n framework utilizing GNU gettext tools (xgettext, msgmerge, msgfmt) to scan Perl source for translatable strings."}], "edges": [], "hyperedges": []}
